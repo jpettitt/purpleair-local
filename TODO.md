@@ -20,6 +20,8 @@ landable on its own.
    both `pm2.5_aqi` (dot) and `pm2_5_aqi` (underscore), `place=inside/outside`
    vs `indoor/outdoor`, and any missing field. Unit tests against the
    redacted indoor + outdoor fixtures.
+   _Done on `feature/api-client`: 31 unit tests (fixture-driven + synthetic
+   quirks) + live smoke through api → parser against both real sensors green._
 4. **`aqi.py`** — pure functions for EPA (Barkjohn 2021), AQandU, LRAPA
    corrections, plus the EPA 24-hour PM2.5 → AQI breakpoint table.
    Unit-tested against published worked examples.
