@@ -10,8 +10,12 @@ landable on its own.
 1. **Repo scaffolding** — `custom_components/purpleair_local/` with empty
    `manifest.json`, `const.py`, package init. `hacs.json` at root.
    GitHub Actions for hassfest + HACS validate + pytest.
+   _Partially done: package skeleton, `manifest.json`, `const.py`, `hacs.json`,
+   `pyproject.toml`, and `tests/` are in. GitHub Actions still TODO._
 2. **`api.py`** — async aiohttp client around `GET /json`. Timeouts,
    single retry, surface `PurpleAirError` subclasses for caller.
+   _Done on `feature/api-client`: 9 unit tests + live smoke against both
+   real sensors green._
 3. **`models.py` + parser** — `SensorReading` dataclass. Parser tolerates
    both `pm2.5_aqi` (dot) and `pm2_5_aqi` (underscore), `place=inside/outside`
    vs `indoor/outdoor`, and any missing field. Unit tests against the
