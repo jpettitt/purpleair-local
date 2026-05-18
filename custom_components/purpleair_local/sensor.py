@@ -69,15 +69,23 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .aqi import aqi_aqandu, aqi_epa, aqi_lrapa, aqi_raw
+from .aqi import (
+    aqi_band,
+    correct_aqandu,
+    correct_epa,
+    correct_lrapa,
+    pm25_to_aqi,
+)
 from .const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
+    CONF_AQI_COLOR_SCHEME,
     CONF_AQI_CORRECTIONS,
     CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
+    DEFAULT_AQI_COLOR_SCHEME,
     DEFAULT_AQI_CORRECTIONS,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
@@ -268,38 +276,35 @@ _AQI_LABELS: dict[str, str] = {
 }
 
 
-def _aqi_value(
+def _aqi_corrected_pm(
     reading: SensorReading,
     channel: str,
     correction: str,
     *,
     disagreement_min_diff_ugm3: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     disagreement_min_pct: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
-) -> int | None:
-    """Compute the AQI for one channel-context under one correction.
+) -> float | None:
+    """Return the µg/m³ value the AQI is derived from for this entity.
 
-    "raw" means "no concentration correction applied" — we compute it
-    ourselves from the channel's `pm2_5_atm` using the current EPA
-    breakpoint table, so a user comparing primary vs channel-A raw AQI
-    always sees them line up at the same value when the channels agree.
-    (The on-device `pm2.5_aqi` field uses the pre-2024 EPA table and is
-    skipped here on purpose; users who want the literal device value can
-    pull it out of the diagnostics dump.)
+    - `raw`: the channel's `pm2_5_atm` (with the primary-disagreement
+      fallback applied for the primary channel).
+    - `aqandu` / `lrapa` / `epa`: the channel's `pm2_5_cf_1` fed
+      through the respective correction formula. EPA additionally
+      needs relative humidity; if no BME is present the entity has
+      no input to correct and we return None (the entity reports
+      `unknown`).
 
-    Everything else feeds cf_1 (and humidity, for EPA) through the
-    published correction formula. Primary channel inherits the same
-    A/B-disagreement fallback as the underlying mass entities (returns
-    the lower channel's input rather than the average when laser
-    disagreement is flagged).
+    Returning the µg/m³ intermediate (rather than going straight to
+    the AQI integer) lets `extra_state_attributes` share the same
+    derivation as `native_value`, so the colour and the number can't
+    drift out of sync.
     """
     if correction == AQI_CORRECTION_RAW:
-        return aqi_raw(
-            _channel_atm(
-                reading,
-                channel,
-                disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
-                disagreement_min_pct=disagreement_min_pct,
-            )
+        return _channel_atm(
+            reading,
+            channel,
+            disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+            disagreement_min_pct=disagreement_min_pct,
         )
     cf1 = _channel_cf1(
         reading,
@@ -307,17 +312,21 @@ def _aqi_value(
         disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
         disagreement_min_pct=disagreement_min_pct,
     )
+    if cf1 is None:
+        return None
     if correction == AQI_CORRECTION_AQANDU:
-        return aqi_aqandu(cf1)
+        return correct_aqandu(cf1)
     if correction == AQI_CORRECTION_LRAPA:
-        return aqi_lrapa(cf1)
+        return correct_lrapa(cf1)
     if correction == AQI_CORRECTION_EPA:
         rh = (
             reading.environment.humidity_pct
             if reading.environment is not None
             else None
         )
-        return aqi_epa(cf1, rh)
+        if rh is None:
+            return None
+        return correct_epa(cf1, rh)
     return None
 
 
@@ -336,12 +345,14 @@ class _AqiEntity(PurpleAirEntity, SensorEntity):
         correction: str,
         disagreement_min_diff_ugm3: float,
         disagreement_min_pct: float,
+        color_scheme: str,
     ) -> None:
         super().__init__(coordinator)
         self._channel = channel
         self._correction = correction
         self._disagreement_min_diff_ugm3 = disagreement_min_diff_ugm3
         self._disagreement_min_pct = disagreement_min_pct
+        self._color_scheme = color_scheme
         self._attr_unique_id = (
             f"{self._sensor_id}_{channel}_aqi_{correction}"
         )
@@ -349,15 +360,34 @@ class _AqiEntity(PurpleAirEntity, SensorEntity):
             _AQI_LABELS[correction], channel
         )
 
-    @property
-    def native_value(self) -> int | None:
-        return _aqi_value(
+    def _corrected_pm(self) -> float | None:
+        return _aqi_corrected_pm(
             self.coordinator.data,
             self._channel,
             self._correction,
             disagreement_min_diff_ugm3=self._disagreement_min_diff_ugm3,
             disagreement_min_pct=self._disagreement_min_pct,
         )
+
+    @property
+    def native_value(self) -> int | None:
+        pm = self._corrected_pm()
+        return pm25_to_aqi(pm) if pm is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Per-poll category + colour for dashboard cards.
+
+        Same `_corrected_pm()` the state value uses, so the colour
+        and the AQI integer always describe the same air. Card
+        templates can read `state_attr(entity, 'category_color')` to
+        drive an icon colour with one line.
+        """
+        band = aqi_band(self._corrected_pm(), scheme=self._color_scheme)
+        if band is None:
+            return None
+        category, color = band
+        return {"category": category, "category_color": color}
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +637,9 @@ def build_entities(
         CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
         DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
     )
+    color_scheme = options.get(
+        CONF_AQI_COLOR_SCHEME, DEFAULT_AQI_COLOR_SCHEME
+    )
 
     # PM mass
     for channel in channels:
@@ -636,6 +669,7 @@ def build_entities(
                     correction=correction,
                     disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
                     disagreement_min_pct=disagreement_min_pct,
+                    color_scheme=color_scheme,
                 )
             )
 

@@ -58,6 +58,115 @@ from __future__ import annotations
 from enum import Enum
 from typing import NamedTuple
 
+# --- per-country color schemes --------------------------------------------
+#
+# Each entry maps a PM2.5 (24-h µg/m³) reading to one of the country's
+# named bands plus its official band colour. Bands are defined by their
+# upper inclusive PM2.5 bound. The topmost band uses `inf` so values
+# outside the table still resolve to "the worst category we publish".
+#
+# These power the `category` / `category_color` attributes on each AQI
+# entity and are completely independent of which AQI breakpoint table
+# the integer state value uses (we always emit the US-EPA AQI number).
+# Users in the UK / EU who look at their PM2.5 sensor next to a local
+# news site can pick the matching scheme so the colour and label match
+# what they expect, even when the AQI number itself reflects the US
+# breakpoints.
+
+
+class _ColorBand(NamedTuple):
+    pm25_high_ugm3: float  # inclusive upper bound
+    category: str  # stable snake_case, used as the entity attribute
+    color: str  # `#rrggbb`
+
+
+# US EPA — the 2024-revised PM2.5 sub-index colours from AirNow.
+_US_EPA_BANDS: tuple[_ColorBand, ...] = (
+    _ColorBand(9.0, "good", "#00e400"),
+    _ColorBand(35.4, "moderate", "#ffff00"),
+    _ColorBand(55.4, "unhealthy_for_sensitive_groups", "#ff7e00"),
+    _ColorBand(125.4, "unhealthy", "#ff0000"),
+    _ColorBand(225.4, "very_unhealthy", "#8f3f97"),
+    _ColorBand(float("inf"), "hazardous", "#7e0023"),
+)
+
+# EU EAQI — European Environment Agency, PM2.5 24-h bands and the
+# official EAQI palette.
+_EU_EAQI_BANDS: tuple[_ColorBand, ...] = (
+    _ColorBand(10.0, "good", "#50f0e6"),
+    _ColorBand(20.0, "fair", "#50ccaa"),
+    _ColorBand(25.0, "moderate", "#f0e641"),
+    _ColorBand(50.0, "poor", "#ff5050"),
+    _ColorBand(75.0, "very_poor", "#960032"),
+    _ColorBand(float("inf"), "extremely_poor", "#7d2181"),
+)
+
+# UK DAQI — UK Defra Daily Air Quality Index, 10 numeric bands grouped
+# into four risk levels (1-3 Low, 4-6 Moderate, 7-9 High, 10 Very High).
+# Category strings encode the numeric band so users can tell adjacent
+# bands apart in templates ("low_3" vs "moderate_4"). Colors are the
+# Defra spec.
+_UK_DAQI_BANDS: tuple[_ColorBand, ...] = (
+    _ColorBand(11.0, "low_1", "#9cff9c"),
+    _ColorBand(23.0, "low_2", "#31ff00"),
+    _ColorBand(35.0, "low_3", "#31cf00"),
+    _ColorBand(41.0, "moderate_4", "#ffff00"),
+    _ColorBand(47.0, "moderate_5", "#ffcf00"),
+    _ColorBand(53.0, "moderate_6", "#ff9a00"),
+    _ColorBand(58.0, "high_7", "#ff6464"),
+    _ColorBand(64.0, "high_8", "#ff0000"),
+    _ColorBand(70.0, "high_9", "#990000"),
+    _ColorBand(float("inf"), "very_high_10", "#ce30ff"),
+)
+
+AQI_COLOR_SCHEME_US_EPA = "us_epa"
+AQI_COLOR_SCHEME_EU_EAQI = "eu_eaqi"
+AQI_COLOR_SCHEME_UK_DAQI = "uk_daqi"
+
+_SCHEMES: dict[str, tuple[_ColorBand, ...]] = {
+    AQI_COLOR_SCHEME_US_EPA: _US_EPA_BANDS,
+    AQI_COLOR_SCHEME_EU_EAQI: _EU_EAQI_BANDS,
+    AQI_COLOR_SCHEME_UK_DAQI: _UK_DAQI_BANDS,
+}
+
+AQI_COLOR_SCHEMES_ALL: tuple[str, ...] = tuple(_SCHEMES.keys())
+
+
+def aqi_band(
+    pm25_ugm3: float | None, *, scheme: str = AQI_COLOR_SCHEME_US_EPA
+) -> tuple[str, str] | None:
+    """Return `(category, color_hex)` for a PM2.5 reading under one scheme.
+
+    Returns `None` only when the input itself is `None` (so callers
+    don't need a separate "missing reading" branch — they can pass the
+    optional value straight through).
+
+    Negative values are clamped to 0 so a humidity-overcorrected EPA
+    reading (`-0.4 µg/m³` is a real possibility from Barkjohn at low
+    PM and high RH) lands in the lowest band rather than slipping
+    through a `<0` guard somewhere.
+
+    Input is truncated to 1 decimal before lookup, mirroring the
+    convention in `pm25_to_aqi()`.
+    """
+    if pm25_ugm3 is None:
+        return None
+    if pm25_ugm3 < 0:
+        pm25_ugm3 = 0.0
+    bands = _SCHEMES.get(scheme)
+    if bands is None:
+        # Unknown scheme — fall back to the default rather than
+        # surfacing as `unknown` on the entity, since a typo in the
+        # options shouldn't make the integration look broken.
+        bands = _US_EPA_BANDS
+    c = int(pm25_ugm3 * 10) / 10
+    for band in bands:
+        if c <= band.pm25_high_ugm3:
+            return (band.category, band.color)
+    # Unreachable: the last band always has pm25_high_ugm3 = inf.
+    top = bands[-1]
+    return (top.category, top.color)
+
 # --- AQI category labels ---------------------------------------------------
 
 
