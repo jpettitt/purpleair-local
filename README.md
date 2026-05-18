@@ -80,6 +80,113 @@ If a sensor's IP later changes (DHCP), edit it from the integration's
 **Configure** screen — the integration verifies the SensorId still
 matches and updates the host in place. No need to delete and re-add.
 
+## Dashboard examples
+
+Each AQI entity carries two extra attributes that any card supporting
+templates can read:
+
+- `category` — a stable snake-case label for the current band
+  (`good`, `moderate`, `unhealthy`, etc., or the UK DAQI form
+  `low_1` … `very_high_10` if you've selected that scheme).
+- `category_color` — the official hex colour for that band.
+
+The colour scheme is per-user, selected in the integration's options
+flow. Default is US EPA (AirNow); EU EAQI and UK DAQI are available.
+
+### Mushroom — icon coloured by AQI
+
+[mushroom-template-card](https://github.com/piitaya/lovelace-mushroom)
+is the lightest-weight way to get a coloured icon next to the AQI
+number. Pick the entity for whichever correction you want
+(`_aqi_raw`, `_aqi_epa`, `_aqi_aqandu`, `_aqi_lrapa`).
+
+```yaml
+type: custom:mushroom-template-card
+entity: sensor.outdoor_0119_aqi_epa
+icon: mdi:weather-hazy
+icon_color: |
+  {{ state_attr('sensor.outdoor_0119_aqi_epa', 'category_color') }}
+primary: |
+  {{ states('sensor.outdoor_0119_aqi_epa') }} AQI
+secondary: |
+  {{ state_attr('sensor.outdoor_0119_aqi_epa', 'category')
+       | replace('_', ' ') | title }}
+```
+
+### apexcharts-card — coloured line, banded background, or both
+
+[apexcharts-card](https://github.com/RomRider/apexcharts-card) has a
+built-in `color_threshold` for series so the line itself changes
+colour as the AQI moves through the bands:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Outdoor AQI (24h)
+graph_span: 24h
+series:
+  - entity: sensor.outdoor_0119_aqi_epa
+    name: AQI (EPA)
+    type: line
+    stroke_width: 3
+    color_threshold:
+      - value: 0
+        color: "#00e400"
+      - value: 51
+        color: "#ffff00"
+      - value: 101
+        color: "#ff7e00"
+      - value: 151
+        color: "#ff0000"
+      - value: 201
+        color: "#8f3f97"
+      - value: 301
+        color: "#7e0023"
+```
+
+For a single-point sparkline coloured by the *current* band, drive
+the colour from the entity attribute directly (apexcharts evaluates
+`EVAL:` strings as JS against the `hass` object):
+
+```yaml
+type: custom:apexcharts-card
+chart_type: radialBar
+series:
+  - entity: sensor.outdoor_0119_aqi_epa
+    color: |
+      EVAL:hass.states['sensor.outdoor_0119_aqi_epa'].attributes.category_color
+```
+
+### button-card — full tile with the category as a background
+
+[custom:button-card](https://github.com/custom-cards/button-card) lets
+you push the category colour all the way to the card background for a
+glanceable indoor/outdoor at-a-glance:
+
+```yaml
+type: custom:button-card
+entity: sensor.outdoor_0119_aqi_epa
+name: Outdoor AQI
+show_state: true
+styles:
+  card:
+    - background-color: "[[[ return entity.attributes.category_color ]]]"
+    - color: white
+    - font-weight: bold
+    - padding: 16px
+  state:
+    - font-size: 2em
+```
+
+### Built-in cards
+
+The standard HA Entity / Tile cards don't take templates in their
+`color` field today, so for the built-ins you'll either use one of
+the custom cards above or wrap a template sensor — see [HA's template
+sensor docs](https://www.home-assistant.io/integrations/template/) for
+the pattern.
+
 ## Development
 
 ### Test suite
