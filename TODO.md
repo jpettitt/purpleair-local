@@ -66,6 +66,11 @@ landable on its own.
    dual, all populated)._
 9. **`binary_sensor.py`** — `online`, `channel_disagreement` (only if
    both channels present).
+   _Done on `feature/binary-sensors`: two entities (online =
+   connectivity class; channel_disagreement = problem class, dual-only,
+   thresholds from options). Refactored shared base entity out of
+   sensor.py into entity.py so the new platform doesn't import from a
+   sibling. 15 unit tests + live smoke against both real sensors green._
 10. **`diagnostics.py`** — redacted dump for bug reports.
 11. **`strings.json` + `translations/en.json`** — config/options flow
     labels and errors.
