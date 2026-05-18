@@ -1,0 +1,19 @@
+# Local Home Assistant testbed for purpleair-local development.
+#
+# Mounts ./custom_components/purpleair_local read-only into HA's
+# custom_components dir, so changes to the integration are picked up
+# the next time HA reloads (or restarts). No file copying.
+#
+# First-time setup: see README → "Development: local HA testbed".
+
+services:
+  ha:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: pa-local-ha
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    volumes:
+      - ./.dev/ha-config:/config
+      - ./custom_components/purpleair_local:/config/custom_components/purpleair_local:ro
+      - /etc/localtime:/etc/localtime:ro

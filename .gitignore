@@ -11,3 +11,9 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# Local HA testbed runtime data (configuration.yaml + storage/, .HA_VERSION,
+# logs, secrets, etc.). The seed template lives in .dev/configuration.yaml.example
+# and is committed.
+/.dev/ha-config/
+

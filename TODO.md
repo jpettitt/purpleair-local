@@ -86,6 +86,15 @@ landable on its own.
     deferred — entities use `_attr_name` directly, which is fine for
     English-only v0.1._
 12. **Manual smoke test** against both real sensors, documented.
+    _In progress on `feature/ha-dev-docker`: `docker-compose.yml` + Makefile
+    targets (`ha-up` / `ha-down` / `ha-logs` / `ha-restart` / `ha-reset`)
+    spin up HA in a container with `custom_components/purpleair_local/`
+    bind-mounted. `.dev/configuration.yaml.example` seeded with
+    `default_config:` + debug logging for our domain. Container booted
+    cleanly (HA 2026.4.4, 1.31 s init, no import errors). User onboards
+    at <http://localhost:8123> then adds the integration from Settings →
+    Devices & Services; the actual click-through smoke test is the user's
+    to perform and document in this README section._
 13. **Tag `v0.1.0`** and cut a HACS release.
 
 ## Post-v0.1.0 (not committed)

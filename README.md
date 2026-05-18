@@ -46,6 +46,36 @@ Not yet installable. When ready:
 If a sensor's IP changes later (DHCP), edit it from the integration's
 **Configure** screen — you do not need to delete and re-add the entry.
 
+## Development
+
+### Test suite
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements_test.txt
+make test
+```
+
+### Local HA testbed (Docker)
+
+A `docker-compose.yml` at the repo root mounts
+`custom_components/purpleair_local/` read-only into a disposable Home
+Assistant container, so edits to the integration are picked up by HA on
+the next reload. Requires Docker (Desktop or compatible).
+
+```sh
+make ha-up        # boots HA at http://localhost:8123 (first start ~1 min)
+make ha-logs      # tail container logs
+make ha-restart   # restart HA after editing the integration
+make ha-down      # stop, keep config
+make ha-reset     # wipe runtime config — back to the onboarding screen
+```
+
+First boot walks through HA's user-creation flow; after that, add the
+integration from **Settings → Devices & Services → Add Integration →
+"PurpleAir Local"**. Runtime data (database, secrets, logs) lives under
+`.dev/ha-config/` and is gitignored.
+
 ## License
 
 MIT.

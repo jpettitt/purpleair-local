@@ -1,0 +1,13 @@
+# Example HA configuration for the purpleair-local dev testbed.
+#
+# Copied to .dev/ha-config/configuration.yaml on first `make ha-up`.
+# Edit the copy if you want to keep changes; the example stays canonical.
+
+default_config:
+
+# Verbose logging for our integration only. Drop or comment out once
+# the integration is stable; HA's default INFO is plenty otherwise.
+logger:
+  default: info
+  logs:
+    custom_components.purpleair_local: debug
