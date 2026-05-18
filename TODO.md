@@ -91,7 +91,7 @@ landable on its own.
     spin up HA in a container with `custom_components/purpleair_local/`
     bind-mounted. `.dev/configuration.yaml.example` seeded with
     `default_config:` + debug logging for our domain. Container booted
-    cleanly (HA 2026.4.4, 1.31 s init, no import errors). User onboards
+    cleanly (HA 2026.5.2, no import errors). User onboards
     at <http://localhost:8123> then adds the integration from Settings →
     Devices & Services; the actual click-through smoke test is the user's
     to perform and document in this README section._
