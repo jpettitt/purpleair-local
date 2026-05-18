@@ -25,6 +25,10 @@ landable on its own.
 4. **`aqi.py`** — pure functions for EPA (Barkjohn 2021), AQandU, LRAPA
    corrections, plus the EPA 24-hour PM2.5 → AQI breakpoint table.
    Unit-tested against published worked examples.
+   _Done on `feature/api-client`: 44 unit tests covering correction math,
+   all 2024-revised band boundaries, truncation, extrapolation above 500,
+   category labels, and None propagation. Live smoke through api → parser
+   → AQI against both real sensors green._
 5. **`coordinator.py`** — `DataUpdateCoordinator` per sensor IP, 120 s
    default, configurable.
 6. **`config_flow.py`** — user step: host, validate, derive name from

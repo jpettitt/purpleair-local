@@ -266,21 +266,45 @@ Runtime behavior:
 
 ## AQI correction formulas
 
-Implementing the three commonly cited ones. All take `pm_cf1`
-(µg/m³, from `pm2_5_cf_1`) and `rh` (%). All return corrected µg/m³,
-which we then run through the standard US EPA 24-hour PM2.5 breakpoints
-to produce an AQI 0–500.
+Three corrections are implemented as pure functions in `aqi.py`. All
+take `pm_cf1` (µg/m³, from `pm2_5_cf_1`) plus `rh` (%, from
+`current_humidity`) where applicable. All return corrected µg/m³,
+clamped at 0, which is then run through the EPA 24-hour PM2.5
+breakpoint table to produce an integer AQI.
 
 - **EPA (Barkjohn et al., 2021):**
   `corrected = 0.524 * pm_cf1 - 0.0862 * rh + 5.75`
-- **AQandU:** `corrected = 0.778 * pm_cf1 + 2.65`
-- **LRAPA:** `corrected = 0.5 * pm_cf1 - 0.66` (clamped at 0)
+- **AQandU (University of Utah):** `corrected = 0.778 * pm_cf1 + 2.65`
+- **LRAPA (Lane Regional Air Protection Agency, OR):**
+  `corrected = 0.5 * pm_cf1 - 0.66` (wood-smoke-tuned; under-corrects
+  in non-smoke conditions)
 
-These get re-verified against the source publications before we ship; the
-numbers above are what we'll seed `aqi.py` with and what the unit tests
-will assert. If the EPA formula evolves (it has been updated since 2021
-to handle high-concentration smoke), we add it as a fourth option rather
-than silently changing what "EPA" means.
+If the EPA's correction evolves further (a 5-piece extension for very
+high concentrations already exists and is what the AirNow Fire and
+Smoke Map uses today), we add it as an additional option rather than
+silently changing what "EPA" means in this integration.
+
+### AQI breakpoint table
+
+We use the **2024-revised** US EPA PM2.5 sub-index of the AQI
+(effective 2024-05-06, 89 FR 16202). Notably this drops AQI 50 from
+12.0 to 9.0 µg/m³ and tightens the upper bands.
+
+| AQI | µg/m³ (upper) | Category |
+| --- | --- | --- |
+| 50 | 9.0 | Good |
+| 100 | 35.4 | Moderate |
+| 150 | 55.4 | Unhealthy for Sensitive Groups |
+| 200 | 125.4 | Unhealthy |
+| 300 | 225.4 | Very Unhealthy |
+| 500 | 325.4 | Hazardous |
+
+Input PM2.5 is truncated to one decimal place before lookup per the
+AirNow Technical Assistance Document. Values above 325.4 µg/m³ are
+**extrapolated** using the top band's slope rather than capped at 500,
+so wildfire-era readings (which routinely exceed 500 µg/m³ in
+Northern California) still produce a meaningful numeric signal for
+automations.
 
 ## Testing
 
