@@ -97,6 +97,16 @@ landable on its own.
     to perform and document in this README section._
 13. **Tag `v0.1.0`** and cut a HACS release.
 
+## Before announcing v0.1.0
+
+- Watch the HACS validator: brand assets now ship in-tree under
+  `custom_components/purpleair_local/brand/` (per the Feb 2026
+  Brands Proxy API change; the brands repo stopped accepting new
+  `custom_integrations/` PRs). The HACS validator still flags
+  missing brands-repo entries — we suppress that with
+  `ignore: brands` in `.github/workflows/validate.yml`. Drop the
+  ignore once the HACS validator recognizes in-tree brand dirs.
+
 ## Post-v0.1.0 (not committed)
 
 - Zeroconf discovery if PA firmware ever advertises one.

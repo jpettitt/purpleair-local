@@ -27,3 +27,7 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # Brand assets require a PR to home-assistant/brands; we'll
+          # file that for v0.1.0 release and drop this ignore. Tracking
+          # in TODO.md.
+          ignore: brands
