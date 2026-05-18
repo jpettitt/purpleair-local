@@ -1,6 +1,13 @@
 """Constants for the PurpleAir Local integration."""
 
+from homeassistant.const import Platform
+
 DOMAIN = "purpleair_local"
+
+# Platforms this integration provides. sensor and binary_sensor cover
+# the full v0.1 entity set; binary_sensor's coordinator is the same
+# instance as sensor's.
+PLATFORMS: tuple[Platform, ...] = (Platform.SENSOR,)
 
 # Sensor docs recommend no faster than once every 10 seconds; we default
 # to the natural /json averaging window (2 minutes) so consecutive polls

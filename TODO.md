@@ -57,6 +57,13 @@ landable on its own.
 8. **`sensor.py`** — PM mass, AQI (raw + EPA default, AQandU/LRAPA
    optional), particle counts (disabled by default), environment,
    diagnostics. Skip entities whose source field is absent.
+   _Done on `feature/sensor-entities`: full entity catalog with primary +
+   per-channel variants (dual only), conditional environment, diagnostic
+   category. __init__.py now builds the coordinator, runs first-refresh
+   (ConfigEntryNotReady on failure), stores in hass.data, forwards to
+   sensor platform. 18 unit tests + live smoke through coordinator +
+   build_entities against both real sensors (20 entities single / 30
+   dual, all populated)._
 9. **`binary_sensor.py`** — `online`, `channel_disagreement` (only if
    both channels present).
 10. **`diagnostics.py`** — redacted dump for bug reports.

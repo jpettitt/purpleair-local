@@ -1,13 +1,15 @@
 """Tests for the PurpleAir Local config flow.
 
 Strategy: patch `PurpleAirClient` at the symbol the config flow imports
-so we don't hit the network. The flow itself runs through HA's real
-config-entries machinery (provided by the `hass` fixture from
-pytest_homeassistant_custom_component).
+so we don't hit the network. We also patch the integration's
+`async_setup_entry` to a no-op so the post-create platform setup (which
+would build a coordinator and try a real HTTP poll) doesn't run inside
+the flow test. Setup is exercised in test_init_entry_setup.py.
 """
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -29,13 +31,17 @@ from custom_components.purpleair_local.const import DOMAIN
 from custom_components.purpleair_local.models import Place, SensorReading
 
 
+@contextlib.contextmanager
 def _patch_client(*, payload: dict | None = None, side_effect: Any = None):
-    """Patch PurpleAirClient where the config flow imports it.
+    """Patch the probe path and short-circuit platform setup.
 
-    Returns a mock whose `get_reading` either returns the given payload
-    or raises the given exception. The flow constructs the client with
-    `PurpleAirClient(host, session)`, so the patched class returns our
-    AsyncMock from its constructor.
+    Two patches together:
+      - `PurpleAirClient` at the config_flow import site: replaces what
+        the probe constructs, so no real HTTP happens during validation.
+      - `async_setup_entry` on the integration package: the flow's
+        `async_create_entry` triggers HA to load the new entry, which
+        would otherwise build a coordinator and try to poll the real
+        sensor (and fail under pytest-socket).
     """
     client = AsyncMock()
     client.host = "patched"
@@ -43,10 +49,17 @@ def _patch_client(*, payload: dict | None = None, side_effect: Any = None):
         client.get_reading.side_effect = side_effect
     else:
         client.get_reading.return_value = payload
-    return patch(
-        "custom_components.purpleair_local.config_flow.PurpleAirClient",
-        return_value=client,
-    )
+    with (
+        patch(
+            "custom_components.purpleair_local.config_flow.PurpleAirClient",
+            return_value=client,
+        ),
+        patch(
+            "custom_components.purpleair_local.async_setup_entry",
+            AsyncMock(return_value=True),
+        ),
+    ):
+        yield client
 
 
 async def _start_user_flow(hass) -> dict:
