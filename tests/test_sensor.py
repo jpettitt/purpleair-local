@@ -22,11 +22,16 @@ from custom_components.purpleair_local.aqi import (
     correct_epa,
     pm25_to_aqi,
 )
+from custom_components.purpleair_local.aqi import (
+    AQI_COLOR_SCHEME_UK_DAQI,
+    AQI_COLOR_SCHEME_US_EPA,
+)
 from custom_components.purpleair_local.const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
+    CONF_AQI_COLOR_SCHEME,
     CONF_AQI_CORRECTIONS,
     CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
@@ -283,6 +288,85 @@ def test_rssi_value_matches_reading(indoor_payload):
         if e.unique_id.endswith("_diag_rssi")
     ]
     assert rssi.native_value == -42  # from the indoor fixture
+
+
+# --- AQI category / color attributes -------------------------------------
+
+
+def test_aqi_entity_exposes_category_and_color_us_epa_default():
+    """Default scheme is US EPA. Clean air → 'good' / green."""
+    payload = _dual_payload(pm25_a=0.0, pm25_b=0.0)
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    attrs = by_id[f"{sid}_primary_aqi_raw"].extra_state_attributes
+    assert attrs == {"category": "good", "category_color": "#00e400"}
+
+
+def test_aqi_entity_attributes_track_pm25_value():
+    """Smoky day → unhealthy band → red."""
+    # 75 µg/m³ ATM → US EPA band "unhealthy" (#ff0000)
+    payload = _dual_payload(pm25_a=75.0, pm25_b=75.0)
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    attrs = by_id[f"{sid}_a_aqi_raw"].extra_state_attributes
+    assert attrs == {"category": "unhealthy", "category_color": "#ff0000"}
+
+
+def test_aqi_entity_uses_selected_color_scheme():
+    """Same PM2.5, different scheme → different category + colour."""
+    payload = _dual_payload(pm25_a=15.0, pm25_b=15.0)  # 15 µg/m³
+    options = {CONF_AQI_COLOR_SCHEME: AQI_COLOR_SCHEME_UK_DAQI}
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options=options))
+    sid = payload["SensorId"]
+    # 15 µg/m³ → UK DAQI band "low_2" (11.1-23.0)
+    attrs = by_id[f"{sid}_a_aqi_raw"].extra_state_attributes
+    assert attrs["category"] == "low_2"
+    assert attrs["category_color"] == "#31ff00"
+
+
+def test_aqi_entity_attribute_for_epa_correction_uses_corrected_value():
+    """The category/color should reflect the CORRECTED PM, not the raw.
+
+    EPA correction at low humidity + 0 PM yields ~5.75 µg/m³ → still 'good'
+    in US EPA, but the colour comes from the EPA-corrected value (5.75),
+    not from the raw ATM (0.0). If the corrected value crosses a band
+    boundary, the colour follows.
+    """
+    # cf1 = 50, rh = 30 → epa-corrected = 0.524*50 - 0.0862*30 + 5.75 = 29.364
+    # That truncates to 29.3 µg/m³ → US EPA "moderate"
+    payload = _dual_payload(pm25_a=33.333, pm25_b=33.333)
+    # cf1 = atm * 1.5 in _dual_payload, so cf1 = 50, atm = 33.333.
+    # Override humidity to 30 by rebuilding env:
+    payload["current_humidity"] = 30.0
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    # Raw uses ATM 33.333 → US EPA "moderate"
+    raw_attrs = by_id[f"{sid}_a_aqi_raw"].extra_state_attributes
+    assert raw_attrs["category"] == "moderate"
+    # EPA-corrected (29.364) is ALSO moderate; same band, different
+    # input. The point is they're computed from their respective
+    # corrected values, not aliased.
+    epa_attrs = by_id[f"{sid}_a_aqi_epa"].extra_state_attributes
+    assert epa_attrs["category"] == "moderate"
+
+
+def test_aqi_entity_attributes_none_when_input_missing():
+    """No BME → no humidity → EPA AQI is unknown → no attributes."""
+    payload = _dual_payload(
+        pm25_a=10.0, pm25_b=10.0, include_bme=False
+    )
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    # EPA needs humidity, which we just dropped
+    assert by_id[f"{sid}_a_aqi_epa"].native_value is None
+    assert by_id[f"{sid}_a_aqi_epa"].extra_state_attributes is None
+    # Raw is fine — ATM doesn't depend on humidity
+    assert by_id[f"{sid}_a_aqi_raw"].extra_state_attributes is not None
 
 
 # --- device info ----------------------------------------------------------

@@ -25,8 +25,11 @@ DEFAULT_REQUEST_TIMEOUT_S = 10.0
 
 CONF_SCAN_INTERVAL_S = "scan_interval_s"
 CONF_AQI_CORRECTIONS = "aqi_corrections"
+CONF_AQI_COLOR_SCHEME = "aqi_color_scheme"
 CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3 = "channel_disagreement_min_diff_ugm3"
 CONF_CHANNEL_DISAGREEMENT_MIN_PCT = "channel_disagreement_min_pct"
+
+DEFAULT_AQI_COLOR_SCHEME = "us_epa"
 
 # AQI correction identifiers — used as values in the multi-select and
 # (later) as suffixes on entity unique_ids, so they need to be stable.

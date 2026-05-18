@@ -40,16 +40,24 @@ from .api import (
     PurpleAirInvalidResponseError,
     PurpleAirTimeoutError,
 )
+from .aqi import (
+    AQI_COLOR_SCHEME_EU_EAQI,
+    AQI_COLOR_SCHEME_UK_DAQI,
+    AQI_COLOR_SCHEME_US_EPA,
+    AQI_COLOR_SCHEMES_ALL,
+)
 from .const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
     AQI_CORRECTIONS_ALL,
+    CONF_AQI_COLOR_SCHEME,
     CONF_AQI_CORRECTIONS,
     CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
     CONF_SCAN_INTERVAL_S,
+    DEFAULT_AQI_COLOR_SCHEME,
     DEFAULT_AQI_CORRECTIONS,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
@@ -192,6 +200,13 @@ _AQI_OPTION_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
+_COLOR_SCHEME_OPTION_LABELS: tuple[tuple[str, str], ...] = (
+    (AQI_COLOR_SCHEME_US_EPA, "US EPA (AirNow)"),
+    (AQI_COLOR_SCHEME_EU_EAQI, "EU EAQI (European Environment Agency)"),
+    (AQI_COLOR_SCHEME_UK_DAQI, "UK DAQI (Defra)"),
+)
+
+
 class PurpleAirOptionsFlow(OptionsFlow):
     """Editable settings for a configured sensor.
 
@@ -251,6 +266,9 @@ class PurpleAirOptionsFlow(OptionsFlow):
                         CONF_AQI_CORRECTIONS: list(
                             user_input[CONF_AQI_CORRECTIONS]
                         ),
+                        CONF_AQI_COLOR_SCHEME: user_input[
+                            CONF_AQI_COLOR_SCHEME
+                        ],
                         CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: float(
                             user_input[CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3]
                         ),
@@ -289,6 +307,15 @@ class PurpleAirOptionsFlow(OptionsFlow):
                 opts.get(CONF_AQI_CORRECTIONS, list(DEFAULT_AQI_CORRECTIONS)),
             )
         )
+        color_scheme_default = cur.get(
+            CONF_AQI_COLOR_SCHEME,
+            opts.get(CONF_AQI_COLOR_SCHEME, DEFAULT_AQI_COLOR_SCHEME),
+        )
+        # Defensive: if a future scheme rename leaves a stale value in
+        # options, snap back to the default rather than serving an
+        # unselectable form.
+        if color_scheme_default not in AQI_COLOR_SCHEMES_ALL:
+            color_scheme_default = DEFAULT_AQI_COLOR_SCHEME
         diff_default = cur.get(
             CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
             opts.get(
@@ -333,6 +360,19 @@ class PurpleAirOptionsFlow(OptionsFlow):
                         ],
                         multiple=True,
                         mode=SelectSelectorMode.LIST,
+                    )
+                ),
+                vol.Required(
+                    CONF_AQI_COLOR_SCHEME,
+                    default=color_scheme_default,
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(value=v, label=lbl)
+                            for v, lbl in _COLOR_SCHEME_OPTION_LABELS
+                        ],
+                        multiple=False,
+                        mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
                 vol.Required(

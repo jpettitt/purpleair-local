@@ -12,8 +12,13 @@ import math
 import pytest
 
 from custom_components.purpleair_local.aqi import (
+    AQI_COLOR_SCHEME_EU_EAQI,
+    AQI_COLOR_SCHEME_UK_DAQI,
+    AQI_COLOR_SCHEME_US_EPA,
+    AQI_COLOR_SCHEMES_ALL,
     AqiCategory,
     aqi_aqandu,
+    aqi_band,
     aqi_category,
     aqi_epa,
     aqi_lrapa,
@@ -172,6 +177,107 @@ def test_convenience_functions_produce_expected_aqi():
     assert aqi_lrapa(100.0) == 135
     # Raw ATM 80 → band 4. 80.0 → slope * (80-55.5) + 151 = 0.701 * 24.5 + 151 ≈ 168.2 → 168
     assert aqi_raw(80.0) == 168
+
+
+# --- aqi_band: per-country color scheme ----------------------------------
+
+
+def test_aqi_band_none_input_returns_none():
+    assert aqi_band(None) is None
+
+
+def test_aqi_band_negative_clamped_to_lowest():
+    """Humidity-overcorrected EPA values can land below zero — that's still
+    'good', not 'unknown'."""
+    assert aqi_band(-0.5, scheme=AQI_COLOR_SCHEME_US_EPA) == (
+        "good",
+        "#00e400",
+    )
+
+
+@pytest.mark.parametrize(
+    "pm,expected",
+    [
+        # Boundary points of the 2024 US EPA bands
+        (0.0, ("good", "#00e400")),
+        (9.0, ("good", "#00e400")),
+        (9.1, ("moderate", "#ffff00")),
+        (35.4, ("moderate", "#ffff00")),
+        (35.5, ("unhealthy_for_sensitive_groups", "#ff7e00")),
+        (55.5, ("unhealthy", "#ff0000")),
+        (125.5, ("very_unhealthy", "#8f3f97")),
+        (225.5, ("hazardous", "#7e0023")),
+        (1000.0, ("hazardous", "#7e0023")),  # extrapolate above top
+    ],
+)
+def test_aqi_band_us_epa(pm, expected):
+    assert aqi_band(pm, scheme=AQI_COLOR_SCHEME_US_EPA) == expected
+
+
+@pytest.mark.parametrize(
+    "pm,expected_category",
+    [
+        (0.0, "good"),
+        (10.0, "good"),
+        (10.1, "fair"),
+        (20.0, "fair"),
+        (20.1, "moderate"),
+        (25.0, "moderate"),
+        (25.1, "poor"),
+        (50.0, "poor"),
+        (50.1, "very_poor"),
+        (75.0, "very_poor"),
+        (75.1, "extremely_poor"),
+        (500.0, "extremely_poor"),
+    ],
+)
+def test_aqi_band_eu_eaqi(pm, expected_category):
+    category, color = aqi_band(pm, scheme=AQI_COLOR_SCHEME_EU_EAQI)
+    assert category == expected_category
+    assert color.startswith("#") and len(color) == 7
+
+
+@pytest.mark.parametrize(
+    "pm,expected_category",
+    [
+        (0.0, "low_1"),
+        (11.0, "low_1"),
+        (11.1, "low_2"),
+        (35.0, "low_3"),
+        (35.1, "moderate_4"),
+        (53.0, "moderate_6"),
+        (53.1, "high_7"),
+        (70.0, "high_9"),
+        (70.1, "very_high_10"),
+        (500.0, "very_high_10"),
+    ],
+)
+def test_aqi_band_uk_daqi(pm, expected_category):
+    category, color = aqi_band(pm, scheme=AQI_COLOR_SCHEME_UK_DAQI)
+    assert category == expected_category
+    assert color.startswith("#") and len(color) == 7
+
+
+def test_aqi_band_unknown_scheme_falls_back_to_us_epa():
+    """A stale or mistyped scheme name shouldn't break the integration."""
+    assert aqi_band(0.0, scheme="schemeschemescheme") == aqi_band(
+        0.0, scheme=AQI_COLOR_SCHEME_US_EPA
+    )
+
+
+def test_aqi_color_schemes_all_lists_implemented_schemes():
+    """The exported tuple must enumerate every scheme so the options-flow
+    schema and tests stay in sync."""
+    for scheme in AQI_COLOR_SCHEMES_ALL:
+        assert aqi_band(0.0, scheme=scheme) is not None
+
+
+def test_aqi_band_truncates_to_one_decimal_like_pm25_to_aqi():
+    """Sub-decimal values must map into the lower band, mirroring the
+    AirNow TAD convention used by `pm25_to_aqi`."""
+    # 9.07 trunc -> 9.0 -> good (US)
+    assert aqi_band(9.07, scheme=AQI_COLOR_SCHEME_US_EPA)[0] == "good"
+    assert aqi_band(9.1, scheme=AQI_COLOR_SCHEME_US_EPA)[0] == "moderate"
 
 
 def test_zero_input_yields_zero_aqi_across_methods():

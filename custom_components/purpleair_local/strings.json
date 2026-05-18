@@ -26,6 +26,7 @@
           "host": "IP address or hostname",
           "scan_interval_s": "Polling interval (seconds)",
           "aqi_corrections": "AQI corrections to expose",
+          "aqi_color_scheme": "AQI category & color scheme (drives the `category` and `category_color` attributes on each AQI entity)",
           "channel_disagreement_min_diff_ugm3": "Channel disagreement: minimum absolute difference (µg/m³)",
           "channel_disagreement_min_pct": "Channel disagreement: minimum relative difference (%)"
         }

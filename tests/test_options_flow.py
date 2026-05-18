@@ -21,15 +21,18 @@ from custom_components.purpleair_local.api import (
     PurpleAirInvalidResponseError,
     PurpleAirTimeoutError,
 )
+from custom_components.purpleair_local.aqi import AQI_COLOR_SCHEME_UK_DAQI
 from custom_components.purpleair_local.const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
+    CONF_AQI_COLOR_SCHEME,
     CONF_AQI_CORRECTIONS,
     CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
     CONF_SCAN_INTERVAL_S,
+    DEFAULT_AQI_COLOR_SCHEME,
     DEFAULT_AQI_CORRECTIONS,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
@@ -153,6 +156,7 @@ async def test_options_save_without_host_change_skips_probe(
                 AQI_CORRECTION_EPA,
                 AQI_CORRECTION_AQANDU,
             ],
+            CONF_AQI_COLOR_SCHEME: AQI_COLOR_SCHEME_UK_DAQI,
             CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: 7.5,
             CONF_CHANNEL_DISAGREEMENT_MIN_PCT: 60.0,
         },
@@ -166,6 +170,7 @@ async def test_options_save_without_host_change_skips_probe(
             AQI_CORRECTION_EPA,
             AQI_CORRECTION_AQANDU,
         ],
+        CONF_AQI_COLOR_SCHEME: AQI_COLOR_SCHEME_UK_DAQI,
         CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: 7.5,
         CONF_CHANNEL_DISAGREEMENT_MIN_PCT: 60.0,
     }
