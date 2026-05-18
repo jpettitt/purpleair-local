@@ -109,8 +109,26 @@ landable on its own.
 
 ## Post-v0.1.0 (not committed)
 
+- **AQI category + color as entity attributes** — add
+  `extra_state_attributes` on each `_AqiEntity` exposing `category`
+  (`good` / `moderate` / `unhealthy_for_sensitive_groups` /
+  `unhealthy` / `very_unhealthy` / `hazardous`) and `category_color`
+  (the official EPA hex: `#00e400` / `#ffff00` / `#ff7e00` /
+  `#ff0000` / `#8f3f97` / `#7e0023`). Lets dashboard cards
+  (Mushroom, button-card, the built-in Tile card via templates)
+  color icons by air quality with one line of card config. Optional
+  side: surface the sensor's own `p25aqic` RGB string as
+  `device_color` (uses pre-2024 EPA breakpoints, same caveat as the
+  on-device AQI value). Ship as v0.1.1.
 - Zeroconf discovery if PA firmware ever advertises one.
 - `?live=true` toggle per sensor.
 - Multi-sensor "site average" derived entity (outdoor average of all
   outdoor sensors).
+- 5-piece extended EPA correction (the piecewise formula AirNow Fire
+  and Smoke Map uses; better than simple Barkjohn above ~250 µg/m³).
+  Add as an additional option, don't replace `EPA`.
+- Smart channel fallback for primary on disagreement (lowest-short-
+  term-variance — needs a small rolling history on the coordinator).
+  Current v0.1 uses min(a, b) which is conservative for the canonical
+  stuck-high failure mode.
 - HA core upstream PR if there's demand.
