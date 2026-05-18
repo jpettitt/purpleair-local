@@ -21,6 +21,7 @@ from custom_components.purpleair_local.models import (
     ParticleCounts,
     Place,
     SensorReading,
+    channels_disagree,
 )
 
 
@@ -257,6 +258,44 @@ def test_booleans_are_not_silently_coerced_to_numbers():
     assert r.channel_a.pm2_5_atm is None
     assert r.channel_a.pm2_5_cf_1 is None
     assert r.diagnostics.rssi_dbm is None
+
+
+def test_float_rssi_rounds_to_nearest_int_not_truncated():
+    """`_int_or_none` rounds rather than truncates.
+
+    Before the fix, `int(-42.7)` truncated toward zero (→ -42) which
+    is the wrong direction for negative values; round gives -43, which
+    is what a user reading the value out loud would say.
+    """
+    payload = _minimal_payload({"pm2_5_atm": 0.0, "rssi": -42.7})
+    r = SensorReading.from_payload(payload)
+    assert r.diagnostics.rssi_dbm == -43
+
+
+# --- channels_disagree helper --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "a,b,min_diff,min_pct,expected",
+    [
+        # Default PurpleAir thresholds (5 µg/m³ AND 70%): both must cross
+        (0.0, 0.0, 5.0, 70.0, False),  # identical
+        (10.0, 10.0, 5.0, 70.0, False),
+        (10.0, 11.0, 5.0, 70.0, False),  # diff 1, rel 9% — neither
+        (10.0, 15.0, 5.0, 70.0, False),  # diff 5, rel 33% — only abs
+        (1.0, 4.0, 5.0, 70.0, False),  # diff 3, rel 75% — only rel
+        (5.0, 50.0, 5.0, 70.0, True),  # diff 45, rel 90% — both
+        # User-set tighter thresholds change what counts
+        (10.0, 15.0, 3.0, 30.0, True),  # both crossed under tighter rules
+        # Both zero: helper must not divide by zero
+        (0.0, 0.0, 0.0, 0.0, False),
+    ],
+)
+def test_channels_disagree(a, b, min_diff, min_pct, expected):
+    assert (
+        channels_disagree(a, b, min_diff_ugm3=min_diff, min_pct=min_pct)
+        is expected
+    )
 
 
 def test_particle_counts_partial_presence():

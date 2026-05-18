@@ -276,6 +276,37 @@ def _parse_datetime(value: Any) -> datetime | None:
     return dt.replace(tzinfo=timezone.utc)
 
 
+def channels_disagree(
+    a: float, b: float, *, min_diff_ugm3: float, min_pct: float
+) -> bool:
+    """PurpleAir-style A/B disagreement test on two PM2.5 ATM values.
+
+    Returns True iff *both* thresholds are crossed: the absolute
+    difference is at least `min_diff_ugm3` µg/m³ AND the relative
+    difference (as a percentage of the larger channel) is at least
+    `min_pct`. Defaults supplied by callers; PurpleAir's own data-
+    quality rule uses 5 µg/m³ and 70 %.
+
+    Returning False at low concentrations is intentional: two readings
+    of 0.1 vs. 0.4 µg/m³ are "75 % different" but not meaningfully so.
+    The absolute-difference threshold catches that case.
+
+    Shared by the channel-disagreement binary sensor and the primary-
+    value fallback in sensor.py — keeping the rule in one place
+    guarantees the two stay in sync.
+    """
+    diff = abs(a - b)
+    if diff < min_diff_ugm3:
+        return False
+    denom = max(a, b)
+    if denom <= 0:
+        # Mathematically impossible (diff >= min_diff > 0 with max == 0),
+        # but guard anyway so the divide can't surprise us.
+        return False
+    rel_pct = (diff / denom) * 100.0
+    return rel_pct >= min_pct
+
+
 def _float_or_none(value: Any) -> float | None:
     """Coerce numeric-ish JSON values to float; treat NaN as missing.
 
@@ -292,12 +323,20 @@ def _float_or_none(value: Any) -> float | None:
 
 
 def _int_or_none(value: Any) -> int | None:
+    """Coerce numeric values to int, rounding (not truncating) floats.
+
+    `int(-42.7)` truncates toward zero and returns -42, which is the
+    wrong direction for fields like RSSI where -42.7 dBm is closer to
+    -43 than to -42. `round()` returns the nearest integer in both
+    signs, which is the behavior a user would expect from any
+    numeric display.
+    """
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        return int(value) if value == value else None
+        return round(value) if value == value else None
     return None
 
 

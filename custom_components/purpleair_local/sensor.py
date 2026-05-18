@@ -76,12 +76,16 @@ from .const import (
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
     CONF_AQI_CORRECTIONS,
+    CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
     DEFAULT_AQI_CORRECTIONS,
+    DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
     DOMAIN,
 )
 from .coordinator import PurpleAirCoordinator
 from .entity import PurpleAirEntity
-from .models import SensorReading
+from .models import SensorReading, channels_disagree
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,13 +109,32 @@ _CHANNEL_B = "b"
 
 
 def _channel_mass(
-    reading: SensorReading, channel: str, field: str
+    reading: SensorReading,
+    channel: str,
+    field: str,
+    *,
+    disagreement_min_diff_ugm3: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    disagreement_min_pct: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
 ) -> float | None:
     """Return one PM mass field from the requested channel context.
 
-    Primary on single-laser sensors is channel A. Primary on dual is
-    the simple A/B average (with sensible fallback when one side
-    is None for some reason).
+    Primary on single-laser sensors is channel A. Primary on dual:
+
+      - When both channels agree (per the supplied disagreement
+        thresholds, evaluated on `pm2_5_atm` as the canonical
+        comparison signal), we return the A/B average.
+      - When the channels disagree, we return the LOWER of the two
+        values. The canonical PA failure mode is laser degradation
+        (dust occlusion, EOL drift) which makes the affected channel
+        read high, so the lower value is the more conservative — and
+        usually more accurate — choice. The accompanying
+        `binary_sensor.channel_disagreement` entity surfaces the
+        condition so automations can react.
+
+    Disagreement thresholds are passed in from the options flow
+    (with the PurpleAir defaults applied as fallbacks at the call
+    site / here). Same `channels_disagree` rule the binary sensor
+    uses; the two stay in sync because they share the helper.
     """
     if channel == _CHANNEL_A:
         return getattr(reading.channel_a, field)
@@ -121,6 +144,7 @@ def _channel_mass(
             if reading.channel_b is not None
             else None
         )
+
     # primary
     a = getattr(reading.channel_a, field)
     if reading.channel_b is None:
@@ -132,15 +156,54 @@ def _channel_mass(
         return b
     if b is None:
         return a
+
+    # Disagreement is determined on PM2.5 ATM regardless of which
+    # field we're returning, because PM2.5 is the signal that drives
+    # the binary sensor's behaviour and we want consistency: when
+    # the disagreement flag is set, ALL primary mass entities switch
+    # to the lower-value path together.
+    pm25_a = reading.channel_a.pm2_5_atm
+    pm25_b = reading.channel_b.pm2_5_atm
+    if pm25_a is not None and pm25_b is not None and channels_disagree(
+        pm25_a,
+        pm25_b,
+        min_diff_ugm3=disagreement_min_diff_ugm3,
+        min_pct=disagreement_min_pct,
+    ):
+        return min(a, b)
     return (a + b) / 2.0
 
 
-def _channel_cf1(reading: SensorReading, channel: str) -> float | None:
-    return _channel_mass(reading, channel, "pm2_5_cf_1")
+def _channel_cf1(
+    reading: SensorReading,
+    channel: str,
+    *,
+    disagreement_min_diff_ugm3: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    disagreement_min_pct: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+) -> float | None:
+    return _channel_mass(
+        reading,
+        channel,
+        "pm2_5_cf_1",
+        disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+        disagreement_min_pct=disagreement_min_pct,
+    )
 
 
-def _channel_atm(reading: SensorReading, channel: str) -> float | None:
-    return _channel_mass(reading, channel, "pm2_5_atm")
+def _channel_atm(
+    reading: SensorReading,
+    channel: str,
+    *,
+    disagreement_min_diff_ugm3: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    disagreement_min_pct: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+) -> float | None:
+    return _channel_mass(
+        reading,
+        channel,
+        "pm2_5_atm",
+        disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+        disagreement_min_pct=disagreement_min_pct,
+    )
 
 
 
@@ -170,10 +233,14 @@ class _PmMassEntity(PurpleAirEntity, SensorEntity):
         short_name: str,
         atm_field: str,
         device_class: SensorDeviceClass,
+        disagreement_min_diff_ugm3: float,
+        disagreement_min_pct: float,
     ) -> None:
         super().__init__(coordinator)
         self._channel = channel
         self._atm_field = atm_field
+        self._disagreement_min_diff_ugm3 = disagreement_min_diff_ugm3
+        self._disagreement_min_pct = disagreement_min_pct
         self._attr_device_class = device_class
         self._attr_unique_id = f"{self._sensor_id}_{channel}_{atm_field}"
         self._attr_name = _label_with_channel(short_name, channel)
@@ -181,7 +248,11 @@ class _PmMassEntity(PurpleAirEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         return _channel_mass(
-            self.coordinator.data, self._channel, self._atm_field
+            self.coordinator.data,
+            self._channel,
+            self._atm_field,
+            disagreement_min_diff_ugm3=self._disagreement_min_diff_ugm3,
+            disagreement_min_pct=self._disagreement_min_pct,
         )
 
 
@@ -198,7 +269,12 @@ _AQI_LABELS: dict[str, str] = {
 
 
 def _aqi_value(
-    reading: SensorReading, channel: str, correction: str
+    reading: SensorReading,
+    channel: str,
+    correction: str,
+    *,
+    disagreement_min_diff_ugm3: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    disagreement_min_pct: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
 ) -> int | None:
     """Compute the AQI for one channel-context under one correction.
 
@@ -211,11 +287,26 @@ def _aqi_value(
     pull it out of the diagnostics dump.)
 
     Everything else feeds cf_1 (and humidity, for EPA) through the
-    published correction formula.
+    published correction formula. Primary channel inherits the same
+    A/B-disagreement fallback as the underlying mass entities (returns
+    the lower channel's input rather than the average when laser
+    disagreement is flagged).
     """
     if correction == AQI_CORRECTION_RAW:
-        return aqi_raw(_channel_atm(reading, channel))
-    cf1 = _channel_cf1(reading, channel)
+        return aqi_raw(
+            _channel_atm(
+                reading,
+                channel,
+                disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+                disagreement_min_pct=disagreement_min_pct,
+            )
+        )
+    cf1 = _channel_cf1(
+        reading,
+        channel,
+        disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+        disagreement_min_pct=disagreement_min_pct,
+    )
     if correction == AQI_CORRECTION_AQANDU:
         return aqi_aqandu(cf1)
     if correction == AQI_CORRECTION_LRAPA:
@@ -243,10 +334,14 @@ class _AqiEntity(PurpleAirEntity, SensorEntity):
         *,
         channel: str,
         correction: str,
+        disagreement_min_diff_ugm3: float,
+        disagreement_min_pct: float,
     ) -> None:
         super().__init__(coordinator)
         self._channel = channel
         self._correction = correction
+        self._disagreement_min_diff_ugm3 = disagreement_min_diff_ugm3
+        self._disagreement_min_pct = disagreement_min_pct
         self._attr_unique_id = (
             f"{self._sensor_id}_{channel}_aqi_{correction}"
         )
@@ -257,7 +352,11 @@ class _AqiEntity(PurpleAirEntity, SensorEntity):
     @property
     def native_value(self) -> int | None:
         return _aqi_value(
-            self.coordinator.data, self._channel, self._correction
+            self.coordinator.data,
+            self._channel,
+            self._correction,
+            disagreement_min_diff_ugm3=self._disagreement_min_diff_ugm3,
+            disagreement_min_pct=self._disagreement_min_pct,
         )
 
 
@@ -276,7 +375,18 @@ _PARTICLE_BINS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _primary_count(reading: SensorReading, field: str) -> float | None:
+def _primary_count(
+    reading: SensorReading,
+    field: str,
+    *,
+    disagreement_min_diff_ugm3: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    disagreement_min_pct: float = DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+) -> float | None:
+    """Primary particle-count value with the same A/B-disagreement
+    fallback as `_channel_mass`. When disagreement is signalled by
+    PM2.5 ATM the laser is unreliable across all six size bins, not
+    just the PM2.5 bucket, so the same lower-of-two preference applies.
+    """
     a = getattr(reading.channel_a.counts, field)
     if reading.channel_b is None:
         return a
@@ -287,6 +397,15 @@ def _primary_count(reading: SensorReading, field: str) -> float | None:
         return b
     if b is None:
         return a
+    pm25_a = reading.channel_a.pm2_5_atm
+    pm25_b = reading.channel_b.pm2_5_atm
+    if pm25_a is not None and pm25_b is not None and channels_disagree(
+        pm25_a,
+        pm25_b,
+        min_diff_ugm3=disagreement_min_diff_ugm3,
+        min_pct=disagreement_min_pct,
+    ):
+        return min(a, b)
     return (a + b) / 2.0
 
 
@@ -302,15 +421,24 @@ class _ParticleCountEntity(PurpleAirEntity, SensorEntity):
         *,
         short_name: str,
         field: str,
+        disagreement_min_diff_ugm3: float,
+        disagreement_min_pct: float,
     ) -> None:
         super().__init__(coordinator)
         self._field = field
+        self._disagreement_min_diff_ugm3 = disagreement_min_diff_ugm3
+        self._disagreement_min_pct = disagreement_min_pct
         self._attr_unique_id = f"{self._sensor_id}_primary_count_{field}"
         self._attr_name = short_name
 
     @property
     def native_value(self) -> float | None:
-        return _primary_count(self.coordinator.data, self._field)
+        return _primary_count(
+            self.coordinator.data,
+            self._field,
+            disagreement_min_diff_ugm3=self._disagreement_min_diff_ugm3,
+            disagreement_min_pct=self._disagreement_min_pct,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +595,19 @@ def build_entities(
     if reading.is_dual_channel:
         channels += [_CHANNEL_A, _CHANNEL_B]
 
+    # Pull disagreement thresholds once. The per-channel A / B
+    # entities ignore these (they always return their own value),
+    # but we pass uniformly to all PM / AQI / particle entities so
+    # the constructor signature is the same regardless of channel.
+    disagreement_min_diff_ugm3 = options.get(
+        CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+        DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    )
+    disagreement_min_pct = options.get(
+        CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
+        DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+    )
+
     # PM mass
     for channel in channels:
         for short_name, field, device_class in _PM_MASS_FIELDS:
@@ -477,6 +618,8 @@ def build_entities(
                     short_name=short_name,
                     atm_field=field,
                     device_class=device_class,
+                    disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+                    disagreement_min_pct=disagreement_min_pct,
                 )
             )
 
@@ -488,7 +631,11 @@ def build_entities(
         for correction in enabled_corrections:
             entities.append(
                 _AqiEntity(
-                    coordinator, channel=channel, correction=correction
+                    coordinator,
+                    channel=channel,
+                    correction=correction,
+                    disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+                    disagreement_min_pct=disagreement_min_pct,
                 )
             )
 
@@ -496,7 +643,11 @@ def build_entities(
     for short_name, field in _PARTICLE_BINS:
         entities.append(
             _ParticleCountEntity(
-                coordinator, short_name=short_name, field=field
+                coordinator,
+                short_name=short_name,
+                field=field,
+                disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+                disagreement_min_pct=disagreement_min_pct,
             )
         )
 

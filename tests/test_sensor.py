@@ -28,6 +28,8 @@ from custom_components.purpleair_local.const import (
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
     CONF_AQI_CORRECTIONS,
+    CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+    CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
 )
 from custom_components.purpleair_local.models import SensorReading
 from custom_components.purpleair_local.sensor import build_entities
@@ -284,6 +286,124 @@ def test_rssi_value_matches_reading(indoor_payload):
 
 
 # --- device info ----------------------------------------------------------
+
+
+# --- primary fallback when channels disagree ----------------------------
+
+
+def test_primary_pm25_picks_lower_when_channels_disagree():
+    """Stuck-high failure mode: pick the lower (likely-healthy) channel."""
+    # 5 vs 50 µg/m³: |diff|=45 (≥5) AND rel=90% (≥70) → disagreement
+    payload = _dual_payload(pm25_a=5.0, pm25_b=50.0)
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    # A and B still report their own values
+    assert by_id[f"{sid}_a_pm2_5_atm"].native_value == 5.0
+    assert by_id[f"{sid}_b_pm2_5_atm"].native_value == 50.0
+    # Primary picks min, NOT (5+50)/2 = 27.5
+    assert by_id[f"{sid}_primary_pm2_5_atm"].native_value == 5.0
+
+
+def test_primary_pm25_averages_when_channels_agree():
+    """Sanity: backwards-compatible path still works when agreement holds."""
+    payload = _dual_payload(pm25_a=10.0, pm25_b=11.0)  # diff 1, well under
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    assert by_id[f"{sid}_primary_pm2_5_atm"].native_value == 10.5
+
+
+def test_primary_aqi_raw_uses_fallback_when_channels_disagree():
+    """AQI flows through _channel_atm, so it inherits the fallback."""
+    from custom_components.purpleair_local.aqi import pm25_to_aqi
+
+    payload = _dual_payload(pm25_a=5.0, pm25_b=50.0)
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    # Primary raw AQI is computed from min (5.0), NOT average (27.5)
+    assert (
+        by_id[f"{sid}_primary_aqi_raw"].native_value == pm25_to_aqi(5.0)
+    )
+    assert by_id[f"{sid}_a_aqi_raw"].native_value == pm25_to_aqi(5.0)
+    assert by_id[f"{sid}_b_aqi_raw"].native_value == pm25_to_aqi(50.0)
+
+
+def test_primary_particle_count_uses_fallback_when_channels_disagree():
+    """Disagreement on PM2.5 ATM also flips particle counts to min."""
+    # Make PM2.5 disagree but give the counts distinct values to compare.
+    payload = _dual_payload(pm25_a=5.0, pm25_b=50.0)
+    payload["p_0_3_um"] = 100.0
+    payload["p_0_3_um_b"] = 999.0
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    assert (
+        by_id[f"{sid}_primary_count_p_0_3_um"].native_value == 100.0
+    )  # min, NOT average (549.5)
+
+
+def test_primary_fallback_uses_option_thresholds():
+    """User-tightened thresholds shift which readings trigger the fallback."""
+    # diff 5, rel 33% — below default 70% but above a 30% custom threshold
+    payload = _dual_payload(pm25_a=10.0, pm25_b=15.0)
+    options = {
+        CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: 3.0,
+        CONF_CHANNEL_DISAGREEMENT_MIN_PCT: 30.0,
+    }
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options=options))
+    sid = payload["SensorId"]
+    # With the user's tighter rule, these channels disagree → min wins
+    assert by_id[f"{sid}_primary_pm2_5_atm"].native_value == 10.0
+
+
+def test_primary_falls_back_only_for_primary_not_individual_channels():
+    """Channel A and B entities are unaffected by disagreement."""
+    payload = _dual_payload(pm25_a=5.0, pm25_b=50.0)
+    coord = _coordinator(payload)
+    by_id = _by_unique_id(build_entities(coord, options={}))
+    sid = payload["SensorId"]
+    assert by_id[f"{sid}_a_pm2_5_atm"].native_value == 5.0
+    assert by_id[f"{sid}_b_pm2_5_atm"].native_value == 50.0
+
+
+def test_single_laser_unaffected_by_thresholds():
+    """Single-laser sensors have no B to disagree with; thresholds inert."""
+    payload = indoor_payload_dict()  # define below
+    coord = _coordinator(payload)
+    options = {
+        CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: 0.0,
+        CONF_CHANNEL_DISAGREEMENT_MIN_PCT: 0.0,
+    }
+    by_id = _by_unique_id(build_entities(coord, options=options))
+    sid = payload["SensorId"]
+    # Primary equals channel A's value; even with absurd thresholds nothing breaks
+    assert by_id[f"{sid}_primary_pm2_5_atm"].native_value == 7.5
+
+
+def indoor_payload_dict() -> dict:
+    """Minimal single-laser payload with a non-zero pm2_5 for the assertion."""
+    return {
+        "SensorId": "aa:bb:cc:dd:ee:01",
+        "hardwareversion": "2.0",
+        "hardwarediscovered": "2.0+BME280+PMSX003-A",
+        "version": "7.02",
+        "place": "inside",
+        "pm1_0_atm": 0.0,
+        "pm2_5_atm": 7.5,
+        "pm10_0_atm": 0.0,
+        "pm1_0_cf_1": 0.0,
+        "pm2_5_cf_1": 7.5,
+        "pm10_0_cf_1": 0.0,
+        "p_0_3_um": 0.0,
+        "p_0_5_um": 0.0,
+        "p_1_0_um": 0.0,
+        "p_2_5_um": 0.0,
+        "p_5_0_um": 0.0,
+        "p_10_0_um": 0.0,
+    }
 
 
 def test_device_info_includes_mac_connection_and_configuration_url(

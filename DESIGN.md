@@ -233,10 +233,28 @@ noisy ones):
 PurpleAir's own data-quality flag treats channels as disagreeing when
 `|A − B| ≥ 5 µg/m³` **and** the relative difference is `≥ 70 %`. We use
 those exact thresholds as the default, configurable in the options flow.
-When the flag trips, the binary sensor goes on and the "primary" PM/AQI
-entities fall back to whichever channel still tracks recent history
-(lowest short-term variance), rather than silently averaging garbage with
-good data.
+Both the binary sensor and the primary-value fallback below evaluate the
+condition on `pm2_5_atm` via a shared `channels_disagree()` helper, so
+they can't drift out of sync.
+
+When the flag trips:
+
+- The `channel_disagreement` binary sensor turns on.
+- The **primary** PM mass, PM2.5 AQI, and particle-count entities fall
+  back to the *lower* of the two channels' values rather than averaging.
+  The canonical PurpleAir failure mode is laser degradation (dust
+  occlusion, end-of-life drift) which causes the affected channel to
+  read high; the lower value is the conservative, usually-correct
+  pick. The per-channel A and B entities are unaffected — they keep
+  reporting their own readings so you can see exactly which laser is
+  out of step.
+
+A more sophisticated fallback (lowest-short-term-variance, requires
+multi-poll history) was considered for v0.1 but deferred — the
+lower-of-two rule covers the common stuck-high failure cleanly without
+state, and the binary sensor surfaces the condition so automations can
+react. Switching to variance-based selection is a non-breaking change
+when we want it.
 
 **Single-channel sensors** (e.g. the user's indoor unit reports
 `hardwarediscovered: 2.0+BME280+PMSX003-A` with no `PMSX003-B`) skip this
