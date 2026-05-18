@@ -79,6 +79,12 @@ landable on its own.
     diagnostics tests + 1 new coordinator test._
 11. **`strings.json` + `translations/en.json`** — config/options flow
     labels and errors.
+    _Done on `feature/translations-review`: audited strings vs code,
+    confirmed no drift, added 3 regression tests (en mirrors strings;
+    every `errors["base"]` key in config_flow.py has a string; the
+    `already_configured` abort has one). Entity-name translations
+    deferred — entities use `_attr_name` directly, which is fine for
+    English-only v0.1._
 12. **Manual smoke test** against both real sensors, documented.
 13. **Tag `v0.1.0`** and cut a HACS release.
 
