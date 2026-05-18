@@ -26,6 +26,10 @@ Per configured sensor:
   the options flow.
 - **Temperature, humidity, dewpoint, pressure** — only when the sensor
   has a BME280 or BME680. BME680 values preferred when both are present.
+  Note: the temperature reading runs a few degrees high. The BME sits
+  inside the PurpleAir enclosure and picks up heat from the laser
+  counters and the ESP processor; PurpleAir's own guidance for outdoor
+  units is to subtract roughly 8 °F (≈ 4.4 °C) from the reported value.
 - **VOC resistance** (Ω) — only when the sensor has a BME680.
 - **Particle counts** in six size bins, primary only, disabled by
   default. Enable individually from the device page when you want them.
@@ -45,7 +49,7 @@ entities and the disagreement binary sensor automatically.
 Via HACS (custom repository):
 
 1. HACS → Integrations → ⋮ → Custom repositories.
-2. Add `https://github.com/jpp/purpleair-local` as an Integration.
+2. Add `https://github.com/jpettitt/purpleair-local` as an Integration.
 3. Install "PurpleAir Local" from the list.
 4. Restart Home Assistant.
 5. Settings → Devices & Services → Add Integration → "PurpleAir Local".
