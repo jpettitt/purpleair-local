@@ -1,0 +1,13 @@
+# Dev / test dependencies for purpleair-local.
+# Install with: pip install -r requirements_test.txt
+#
+# Do NOT add `-e .` here or to a pyproject [project] block — see the
+# explanation in pyproject.toml.
+
+pytest>=8.0
+pytest-asyncio>=0.23
+pytest-aiohttp>=1.0
+# Brings in homeassistant core plus the `hass` fixture and other test
+# helpers. Heavy install (~600 MB of deps) but unavoidable for
+# integration-level tests.
+pytest-homeassistant-custom-component>=0.13

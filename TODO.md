@@ -38,6 +38,15 @@ landable on its own.
    because `config_entry=` kwarg on DataUpdateCoordinator was added then._
 6. **`config_flow.py`** — user step: host, validate, derive name from
    `place` + MAC suffix, unique-id = `SensorId`.
+   _Done on `feature/coordinator`: single user step, normalizes host
+   (strips scheme/trailing slash/whitespace), maps client errors to
+   `cannot_connect` / `invalid_response`, derives title "Indoor e7fc"
+   from place + last-4 of MAC. Re-running the flow with the same
+   SensorId updates host in place (DHCP-change recovery). 17 unit
+   tests + minimal __init__.py setup stubs. Test infra switched off
+   `pip install -e .` because the PEP 660 path-hook shim breaks HA's
+   integration loader on Python 3.14; test deps now live in
+   `requirements_test.txt`._
 7. **Options flow** — host (with SensorId guard), poll interval,
    AQI corrections to enable, channel-disagreement thresholds.
 8. **`sensor.py`** — PM mass, AQI (raw + EPA default, AQandU/LRAPA

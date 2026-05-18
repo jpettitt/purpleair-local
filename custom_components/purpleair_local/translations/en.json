@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PurpleAir Local",
+        "description": "Enter the LAN address of your PurpleAir sensor (the IP it has on your home network — e.g. 192.168.1.42). The integration will read its data directly without going through the PurpleAir cloud.",
+        "data": {
+          "host": "IP address or hostname"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the sensor at that address. Check the IP and that the sensor is powered on and connected to the same network.",
+      "invalid_response": "The sensor responded but the data wasn't recognizable as a PurpleAir reading. Double-check the address — another device may be answering on that IP."
+    },
+    "abort": {
+      "already_configured": "This sensor is already configured. Its host has been updated to the new address."
+    }
+  }
+}
