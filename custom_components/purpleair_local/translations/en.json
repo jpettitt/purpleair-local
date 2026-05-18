@@ -16,5 +16,25 @@
     "abort": {
       "already_configured": "This sensor is already configured. Its host has been updated to the new address."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PurpleAir Local options",
+        "description": "Change the sensor's IP (the unique sensor ID will be re-verified), polling cadence, which AQI corrections to expose as entities, or the channel-disagreement thresholds.",
+        "data": {
+          "host": "IP address or hostname",
+          "scan_interval_s": "Polling interval (seconds)",
+          "aqi_corrections": "AQI corrections to expose",
+          "channel_disagreement_min_diff_ugm3": "Channel disagreement: minimum absolute difference (µg/m³)",
+          "channel_disagreement_min_pct": "Channel disagreement: minimum relative difference (%)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the sensor at the new address.",
+      "invalid_response": "The new address responded but the data wasn't recognizable.",
+      "sensor_mismatch": "The device at the new address has a different sensor ID — it's a different physical PurpleAir. Refusing to rebind to it. If you really want to use that device, remove this integration entry and add it as a new one."
+    }
   }
 }

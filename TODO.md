@@ -49,6 +49,11 @@ landable on its own.
    `requirements_test.txt`._
 7. **Options flow** — host (with SensorId guard), poll interval,
    AQI corrections to enable, channel-disagreement thresholds.
+   _Done on `feature/coordinator`: single-step options form with all four
+   fields, host validated against the entry's unique SensorId on change
+   (refuses to silently rebind to a different physical sensor),
+   pre-filled with current values or hard-coded defaults. 10 unit
+   tests + reload-on-options-change listener wired in __init__.py._
 8. **`sensor.py`** — PM mass, AQI (raw + EPA default, AQandU/LRAPA
    optional), particle counts (disabled by default), environment,
    diagnostics. Skip entities whose source field is absent.
