@@ -3,9 +3,8 @@
 A Home Assistant custom integration that polls PurpleAir PA-II (and
 compatible) sensors directly on the LAN — no cloud, no API key.
 
-**Status:** early development. Design is locked, implementation has not
-started. See [DESIGN.md](DESIGN.md) for architecture and decisions, and
-[TODO.md](TODO.md) for the roadmap.
+See [DESIGN.md](DESIGN.md) for architecture and the decisions behind
+the implementation.
 
 ## Why local
 
@@ -14,37 +13,47 @@ started. See [DESIGN.md](DESIGN.md) for architecture and decisions, and
 - Sub-minute polling is possible (sensor minimum is 10 s; we default to
   120 s to match the sensor's natural averaging cadence).
 
-## What it will provide
+## What it provides
 
-Per sensor, on first release:
+Per configured sensor:
 
-- PM1.0 / PM2.5 / PM10 mass concentration (µg/m³), per channel and as a
-  cross-channel primary.
-- PM2.5 AQI in the sensor's raw form **and** with the EPA (Barkjohn 2021)
-  correction applied. AQandU and LRAPA corrections are available via the
-  options flow.
-- Temperature, humidity, dewpoint, pressure (when the sensor has a BME).
-- Particle-count entities (per 0.1 L of air, six bins) — created but
-  disabled by default.
-- Channel-disagreement binary sensor using PurpleAir's own
-  `≥5 µg/m³ AND ≥70 %` thresholds.
-- Diagnostics: RSSI, uptime, firmware version, free memory.
+- **PM1.0 / PM2.5 / PM10 mass concentration** (µg/m³, ATM density) —
+  always a primary entity; channel A and channel B added on dual-laser
+  units. Primary on dual is the simple A/B average for v0.1.
+- **PM2.5 AQI** — one entity per enabled correction, using the
+  2024-revised US EPA breakpoint table. Default: raw (no concentration
+  correction) and EPA (Barkjohn 2021). AQandU and LRAPA available via
+  the options flow.
+- **Temperature, humidity, dewpoint, pressure** — only when the sensor
+  has a BME280 or BME680. BME680 values preferred when both are present.
+- **VOC resistance** (Ω) — only when the sensor has a BME680.
+- **Particle counts** in six size bins, primary only, disabled by
+  default. Enable individually from the device page when you want them.
+- **Diagnostics** — WiFi signal, uptime, free heap, firmware version,
+  last reported timestamp. Free heap and firmware are disabled by
+  default.
+- **Online** binary sensor — reflects the coordinator's last poll status.
+- **Channel disagreement** binary sensor — dual-laser only. Trips when
+  both PurpleAir thresholds are crossed (default ≥5 µg/m³ AND ≥70 %),
+  configurable in options.
 
-Sensors with only one laser (some indoor PA-II units) skip the channel-B
+Single-laser sensors (some indoor PA-II units) skip the channel-B
 entities and the disagreement binary sensor automatically.
 
-## Install (eventually)
+## Install
 
-Not yet installable. When ready:
+Via HACS (custom repository):
 
-1. Add this repo to HACS as a custom integration.
-2. Install "PurpleAir Local".
-3. Restart Home Assistant.
-4. Settings → Devices & Services → Add Integration → "PurpleAir Local".
-5. Enter the sensor's IP. Repeat for each sensor.
+1. HACS → Integrations → ⋮ → Custom repositories.
+2. Add `https://github.com/jpp/purpleair-local` as an Integration.
+3. Install "PurpleAir Local" from the list.
+4. Restart Home Assistant.
+5. Settings → Devices & Services → Add Integration → "PurpleAir Local".
+6. Enter the sensor's IP. Repeat for each sensor.
 
-If a sensor's IP changes later (DHCP), edit it from the integration's
-**Configure** screen — you do not need to delete and re-add the entry.
+If a sensor's IP later changes (DHCP), edit it from the integration's
+**Configure** screen — the integration verifies the SensorId still
+matches and updates the host in place. No need to delete and re-add.
 
 ## Development
 

@@ -8,6 +8,8 @@
   "config_flow": true,
   "iot_class": "local_polling",
   "integration_type": "device",
+  "quality_scale": "silver",
+  "loggers": ["custom_components.purpleair_local"],
   "requirements": [],
   "dependencies": []
 }

@@ -195,16 +195,22 @@ whichever is healthy):
 - `pm1_0` (µg/m³, ATM)
 - `pm2_5` (µg/m³, ATM)
 - `pm10_0` (µg/m³, ATM)
-- `pm2_5_aqi_raw` — what the device computed
-- `pm2_5_aqi_epa` — Barkjohn 2021 EPA correction (the formula HA's PurpleAir
-  cloud integration also uses)
+- `pm2_5_aqi_raw` — uncorrected ATM density run through the EPA
+  breakpoint table. We **do not** pass through the on-device
+  `pm2.5_aqi` field for per-channel entities because the firmware
+  uses the pre-2024 EPA breakpoints while our table is post-2024;
+  doing both would produce inconsistent numbers across the channel-A,
+  channel-B, and primary "raw" entities for the same input. Users
+  who want the literal on-device value can pull it from the
+  diagnostics download.
+- `pm2_5_aqi_epa` — Barkjohn 2021 EPA correction (the formula HA's
+  PurpleAir cloud integration also uses)
 - `pm2_5_aqi_aqandu` — AQandU correction
 - `pm2_5_aqi_lrapa` — LRAPA correction (wood-smoke-tuned)
 
 The corrections all consume `pm2_5_cf_1` plus relative humidity; we hold the
 formulas in `aqi.py` as pure functions and unit-test them against published
-worked examples. Each AQI entity exposes the underlying corrected µg/m³ as
-an attribute so power users can build their own breakpoints.
+worked examples.
 
 **Particle counts** (per channel, hidden by default — useful but noisy):
 `p_0_3_um`, `p_0_5_um`, `p_1_0_um`, `p_2_5_um`, `p_5_0_um`, `p_10_0_um`.

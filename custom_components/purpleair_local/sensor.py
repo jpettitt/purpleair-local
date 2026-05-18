@@ -143,16 +143,6 @@ def _channel_atm(reading: SensorReading, channel: str) -> float | None:
     return _channel_mass(reading, channel, "pm2_5_atm")
 
 
-def _channel_aqi_onboard(
-    reading: SensorReading, channel: str
-) -> int | None:
-    """The AQI value the sensor itself computed, before any correction."""
-    if channel == _CHANNEL_A:
-        return reading.channel_a.pm2_5_aqi
-    if channel == _CHANNEL_B and reading.channel_b is not None:
-        return reading.channel_b.pm2_5_aqi
-    # primary uses our own raw-AQI conversion of the averaged ATM
-    return aqi_raw(_channel_atm(reading, _CHANNEL_PRIMARY))
 
 
 # ---------------------------------------------------------------------------
@@ -212,13 +202,19 @@ def _aqi_value(
 ) -> int | None:
     """Compute the AQI for one channel-context under one correction.
 
-    "raw" uses what the sensor put in pm2.5_aqi for the per-channel
-    entities and our own conversion of the averaged ATM for primary;
-    everything else feeds cf_1 (and humidity, for EPA) through the
+    "raw" means "no concentration correction applied" — we compute it
+    ourselves from the channel's `pm2_5_atm` using the current EPA
+    breakpoint table, so a user comparing primary vs channel-A raw AQI
+    always sees them line up at the same value when the channels agree.
+    (The on-device `pm2.5_aqi` field uses the pre-2024 EPA table and is
+    skipped here on purpose; users who want the literal device value can
+    pull it out of the diagnostics dump.)
+
+    Everything else feeds cf_1 (and humidity, for EPA) through the
     published correction formula.
     """
     if correction == AQI_CORRECTION_RAW:
-        return _channel_aqi_onboard(reading, channel)
+        return aqi_raw(_channel_atm(reading, channel))
     cf1 = _channel_cf1(reading, channel)
     if correction == AQI_CORRECTION_AQANDU:
         return aqi_aqandu(cf1)
@@ -332,13 +328,14 @@ class _EnvironmentEntity(PurpleAirEntity, SensorEntity):
         short_name: str,
         env_field: str,
         unique_key: str,
-        device_class: SensorDeviceClass,
+        device_class: SensorDeviceClass | None,
         unit: str,
         precision: int = 1,
     ) -> None:
         super().__init__(coordinator)
         self._env_field = env_field
-        self._attr_device_class = device_class
+        if device_class is not None:
+            self._attr_device_class = device_class
         self._attr_native_unit_of_measurement = unit
         self._attr_suggested_display_precision = precision
         self._attr_unique_id = f"{self._sensor_id}_env_{unique_key}"
@@ -558,7 +555,9 @@ def build_entities(
                     short_name="VOC resistance",
                     env_field="voc_resistance",
                     unique_key="voc",
-                    device_class=SensorDeviceClass.AQI,  # closest match
+                    # No HA device class fits gas-sensor resistance (Ω);
+                    # leave it unset so HA doesn't try to convert units.
+                    device_class=None,
                     unit="Ω",
                 )
             )

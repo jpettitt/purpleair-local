@@ -151,20 +151,29 @@ def test_aqi_empty_corrections_creates_no_aqi_entities(indoor_payload):
     assert not any("_aqi_" in e.unique_id for e in entities)
 
 
-def test_aqi_raw_per_channel_uses_on_device_value():
-    """Channel-A raw AQI must come from pm2.5_aqi on the device, not a recompute.
+def test_aqi_raw_is_consistent_between_channel_and_primary():
+    """All "raw" AQI entities must use the same breakpoint table.
 
-    This matters because the on-device AQI uses pre-2024 breakpoints and
-    we want users who select "raw" to see exactly what the sensor reports.
+    Before the fix, per-channel raw passed through the on-device
+    `pm2.5_aqi` (pre-2024 EPA table from firmware) while primary raw
+    used our 2024 table, so identical A/B readings could produce
+    different AQI values across the channel-A, channel-B, and primary
+    entities. Now they all use `aqi_raw()` on the ATM density.
     """
     payload = _dual_payload(
-        pm25_a=10.0, pm25_b=20.0, aqi_a=42, aqi_b=58
+        pm25_a=10.0, pm25_b=20.0, aqi_a=999, aqi_b=999
     )
     coord = _coordinator(payload)
     by_id = _by_unique_id(build_entities(coord, options={}))
     sid = payload["SensorId"]
-    assert by_id[f"{sid}_a_aqi_raw"].native_value == 42
-    assert by_id[f"{sid}_b_aqi_raw"].native_value == 58
+
+    # On-device AQI (999) is intentionally bogus to prove we don't pass
+    # it through. All three raw entities should reflect aqi_raw() of
+    # their channel's ATM density.
+    assert by_id[f"{sid}_a_aqi_raw"].native_value == pm25_to_aqi(10.0)
+    assert by_id[f"{sid}_b_aqi_raw"].native_value == pm25_to_aqi(20.0)
+    # Primary is the A/B average: (10+20)/2 = 15
+    assert by_id[f"{sid}_primary_aqi_raw"].native_value == pm25_to_aqi(15.0)
 
 
 def test_aqi_epa_uses_cf1_and_humidity():
