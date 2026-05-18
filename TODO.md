@@ -31,6 +31,11 @@ landable on its own.
    → AQI against both real sensors green._
 5. **`coordinator.py`** — `DataUpdateCoordinator` per sensor IP, 120 s
    default, configurable.
+   _Done on `feature/coordinator`: 8 unit tests (happy path, all three
+   client error types, malformed payload, default/override scan interval,
+   transient-failure recovery) + live smoke through coordinator against
+   both real sensors green. Bumped `hacs.json` minimum HA to 2024.10
+   because `config_entry=` kwarg on DataUpdateCoordinator was added then._
 6. **`config_flow.py`** — user step: host, validate, derive name from
    `place` + MAC suffix, unique-id = `SensorId`.
 7. **Options flow** — host (with SensorId guard), poll interval,

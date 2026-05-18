@@ -17,6 +17,15 @@ from custom_components.purpleair_local.api import (
     PurpleAirTimeoutError,
 )
 
+# pytest-homeassistant-custom-component installs an autouse fixture that
+# disables raw socket use. Our api tests spin up real aiohttp servers on
+# localhost (the most faithful way to test an HTTP client), so we
+# re-enable sockets for this whole module via the `socket_enabled`
+# fixture from pytest-socket.
+@pytest.fixture(autouse=True)
+def _allow_sockets(socket_enabled):
+    yield
+
 
 # --- helpers ---------------------------------------------------------------
 
