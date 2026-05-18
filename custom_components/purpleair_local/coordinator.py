@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -49,6 +50,12 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
             update_interval=timedelta(seconds=scan_interval_s),
         )
         self.client = client
+        # Kept around between polls so the diagnostics download can
+        # include the exact bytes the sensor returned, not just the
+        # parsed dataclass — useful when a bug report concerns a
+        # firmware quirk the parser hasn't accounted for. None until
+        # the first successful parse.
+        self.last_raw_payload: dict[str, Any] | None = None
 
     async def _async_update_data(self) -> SensorReading:
         try:
@@ -61,7 +68,7 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
                 f"could not fetch reading from {self.client.host}: {err}"
             ) from err
         try:
-            return SensorReading.from_payload(payload)
+            reading = SensorReading.from_payload(payload)
         except ValueError as err:
             # Reached when the sensor responds but the JSON lacks a
             # SensorId — almost certainly a firmware bug, not a network
@@ -69,3 +76,5 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
             raise UpdateFailed(
                 f"malformed payload from {self.client.host}: {err}"
             ) from err
+        self.last_raw_payload = payload
+        return reading

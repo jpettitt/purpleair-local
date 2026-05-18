@@ -40,7 +40,26 @@ async def test_coordinator_happy_path_returns_sensor_reading(hass, indoor_payloa
     assert coord.last_update_success is True
     assert isinstance(coord.data, SensorReading)
     assert coord.data.sensor_id == indoor_payload["SensorId"]
+    # Raw payload kept for diagnostics download. Identity, not equality,
+    # so we know it's the same dict instance the parser saw.
+    assert coord.last_raw_payload is indoor_payload
     client.get_reading.assert_awaited_once()
+
+
+async def test_coordinator_last_raw_payload_unchanged_on_failed_update(
+    hass, indoor_payload
+):
+    """A failed poll must not overwrite the previous good payload."""
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+    coord = PurpleAirCoordinator(hass, client)
+    await coord.async_refresh()
+    assert coord.last_raw_payload is indoor_payload
+
+    client.get_reading.side_effect = PurpleAirTimeoutError("nope")
+    await coord.async_refresh()
+    # The old payload is still there for diagnostics to surface.
+    assert coord.last_raw_payload is indoor_payload
 
 
 @pytest.mark.parametrize(

@@ -72,6 +72,11 @@ landable on its own.
    sensor.py into entity.py so the new platform doesn't import from a
    sibling. 15 unit tests + live smoke against both real sensors green._
 10. **`diagnostics.py`** — redacted dump for bug reports.
+    _Done on `feature/diagnostics`: includes config entry + coordinator
+    health + last raw /json payload, with host / SensorId / lat / lon /
+    ssid / Geo all redacted. Coordinator now stashes `last_raw_payload`
+    so the download captures real firmware quirks for bug reports. 5
+    diagnostics tests + 1 new coordinator test._
 11. **`strings.json` + `translations/en.json`** — config/options flow
     labels and errors.
 12. **Manual smoke test** against both real sensors, documented.
