@@ -1,0 +1,29 @@
+# Static validation: hassfest (HA's integration schema/manifest check)
+# and the HACS install validator. Both are quick (~30s each) and catch
+# almost every "I forgot a manifest field" or "the strings don't match
+# the code" class of regression before users do.
+
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
