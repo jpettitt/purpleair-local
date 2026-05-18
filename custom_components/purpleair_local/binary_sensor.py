@@ -37,6 +37,7 @@ from .const import (
 )
 from .coordinator import PurpleAirCoordinator
 from .entity import PurpleAirEntity
+from .models import channels_disagree
 
 
 class _OnlineBinarySensor(PurpleAirEntity, BinarySensorEntity):
@@ -81,19 +82,9 @@ class _ChannelDisagreementBinarySensor(PurpleAirEntity, BinarySensorEntity):
         b = reading.channel_b.pm2_5_atm
         if a is None or b is None:
             return None
-
-        diff = abs(a - b)
-        if diff < self._min_diff_ugm3:
-            return False
-
-        denom = max(a, b)
-        if denom <= 0:
-            # diff >= min_diff_ugm3 (typically 5) while max(a,b) is 0
-            # is mathematically impossible, but guard anyway.
-            return False
-
-        rel_pct = (diff / denom) * 100.0
-        return rel_pct >= self._min_pct
+        return channels_disagree(
+            a, b, min_diff_ugm3=self._min_diff_ugm3, min_pct=self._min_pct
+        )
 
 
 async def async_setup_entry(
