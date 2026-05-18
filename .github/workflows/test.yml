@@ -1,0 +1,39 @@
+# pytest run against the same setup developers use locally:
+# requirements_test.txt (which pulls homeassistant via
+# pytest-homeassistant-custom-component) and a single Python version
+# matching the HA stable container's. Add to the matrix when HA core
+# starts supporting a newer minor.
+
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          # Caches the wheel downloads keyed on requirements_test.txt;
+          # cuts a couple minutes off the second run onward.
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+
+      - name: Run pytest
+        run: pytest -v
