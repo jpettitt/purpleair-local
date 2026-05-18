@@ -1,7 +1,18 @@
 # PurpleAir Local
 
+[![HACS Custom][hacs-shield]][hacs]
+[![GitHub Release][releases-shield]][releases]
+[![License][license-shield]](LICENSE)
+![Maintenance][maintenance-shield]
+[![Validate][validate-shield]][validate]
+[![Tests][tests-shield]][tests]
+
 A Home Assistant custom integration that polls PurpleAir PA-II (and
 compatible) sensors directly on the LAN — no cloud, no API key.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][hacs-install-shield]][hacs-install]
+&nbsp;
+[![Open your Home Assistant instance and start setting up a new integration.][add-shield]][add]
 
 See [DESIGN.md](DESIGN.md) for architecture and the decisions behind
 the implementation.
@@ -46,14 +57,24 @@ entities and the disagreement binary sensor automatically.
 
 ## Install
 
-Via HACS (custom repository):
+The quick way — two clicks if your Home Assistant browser session is
+already authenticated:
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][hacs-install-shield]][hacs-install]
+&nbsp;
+[![Open your Home Assistant instance and start setting up a new integration.][add-shield]][add]
+
+The first button opens HACS pointed at this repo (you'll still need to
+click **Download** in HACS and then restart Home Assistant). The second
+button opens the integration's config flow once it's installed.
+
+The manual equivalent:
 
 1. HACS → Integrations → ⋮ → Custom repositories.
 2. Add `https://github.com/jpettitt/purpleair-local` as an Integration.
-3. Install "PurpleAir Local" from the list.
-4. Restart Home Assistant.
-5. Settings → Devices & Services → Add Integration → "PurpleAir Local".
-6. Enter the sensor's IP. Repeat for each sensor.
+3. Install "PurpleAir Local" from the list, then restart Home Assistant.
+4. Settings → Devices & Services → Add Integration → "PurpleAir Local".
+5. Enter the sensor's IP. Repeat for each sensor.
 
 If a sensor's IP later changes (DHCP), edit it from the integration's
 **Configure** screen — the integration verifies the SensorId still
@@ -92,3 +113,20 @@ integration from **Settings → Devices & Services → Add Integration →
 ## License
 
 MIT.
+
+<!-- Badge / link references -->
+
+[hacs-shield]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
+[hacs]: https://github.com/hacs/integration
+[releases-shield]: https://img.shields.io/github/v/release/jpettitt/purpleair-local?style=for-the-badge
+[releases]: https://github.com/jpettitt/purpleair-local/releases
+[license-shield]: https://img.shields.io/github/license/jpettitt/purpleair-local?style=for-the-badge
+[maintenance-shield]: https://img.shields.io/maintenance/yes/2026?style=for-the-badge
+[validate-shield]: https://img.shields.io/github/actions/workflow/status/jpettitt/purpleair-local/validate.yml?label=Validate&style=for-the-badge
+[validate]: https://github.com/jpettitt/purpleair-local/actions/workflows/validate.yml
+[tests-shield]: https://img.shields.io/github/actions/workflow/status/jpettitt/purpleair-local/test.yml?label=Tests&style=for-the-badge
+[tests]: https://github.com/jpettitt/purpleair-local/actions/workflows/test.yml
+[hacs-install-shield]: https://my.home-assistant.io/badges/hacs_repository.svg
+[hacs-install]: https://my.home-assistant.io/redirect/hacs_repository/?owner=jpettitt&repository=purpleair-local&category=integration
+[add-shield]: https://my.home-assistant.io/badges/config_flow_start.svg
+[add]: https://my.home-assistant.io/redirect/config_flow_start/?domain=purpleair_local
