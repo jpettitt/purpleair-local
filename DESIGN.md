@@ -141,14 +141,69 @@ One `DataUpdateCoordinator` per sensor IP — keeps a failing sensor from
 stalling reads on the healthy ones, and lets each sensor have its own poll
 interval if we ever expose that.
 
+An entry may run a *second* coordinator against the same sensor when live
+entities are enabled; see "Live entities" below.
+
 ### Polling cadence
 
 - Default: **120 s**, matching the natural cadence of `/json`.
 - Minimum allowed in the options flow: **15 s** (safely above the docs'
   10 s floor).
-- Endpoint: always `/json` (averaged). `?live=true` is noisier and there's
-  no good reason to default to it; we may expose a per-sensor toggle later
-  if anyone asks.
+- Endpoint: `/json` (averaged) for the canonical series. `?live=true` is
+  available as an additive opt-in, never as a replacement.
+
+### Live entities
+
+Added in response to [issue #7](https://github.com/jpettitt/purpleair-local/issues/7):
+an automation shutting down mechanical ventilation on a wood-smoke plume
+cares about detection latency more than about measurement noise.
+
+**Additive, not a mode switch.** Enabling live adds a second set of
+measurement entities fed by `?live=true`, alongside the averaged ones.
+A straight toggle was rejected: the averaged series is what belongs in
+history and long-term statistics, so swapping it out would fix the
+automation and ruin the graphs.
+
+Implementation:
+
+- **Two coordinators per entry**, not one coordinator fetching both.
+  `PurpleAirEntity` derives its `DeviceInfo` from `coordinator.data.sensor_id`,
+  so the second coordinator's entities attach to the same device with no
+  entity-layer change, and the averaged entities keep their coordinator,
+  unique_ids and history untouched. The alternative — one coordinator
+  holding both payloads — would turn `coordinator.data` into a container
+  and ripple through every entity value accessor for no user-visible gain.
+- Only the averaged coordinator gates setup (`ConfigEntryNotReady`) and
+  backs the `online` binary sensor. A live-endpoint failure must not blank
+  the averaged entities.
+- **Live is a subset**: PM mass, AQI and particle counts only, primary
+  channel only. Environment and diagnostic fields are returned identically
+  on both endpoints, so twins of those would be duplicates; per-channel
+  entities exist to expose a failing laser, which is a slow-drift
+  judgement better made on averaged data.
+- Live entities carry a `_live` unique_id suffix and a " (live)" name
+  suffix. Averaged ids are unchanged — a regression test pins the full
+  dual-laser id set, since changing one would orphan a user's history.
+
+**Measured behaviour** (PA-II, fw 7.02, polling `?live=true` every 2 s for
+3 min — 90/90 HTTP 200, median 73 ms):
+
+| field | value changes in 89 polls | median gap |
+| --- | --- | --- |
+| `pressure` | 80 | 2 s |
+| `pm2_5_atm` | 11 | **19 s** (max 43 s) |
+
+The BME fields stream instantaneously, but PM is bounded by the laser
+counter's own cycle — roughly the payload's `loggingrate: 15`, with real
+jitter. Hence a **15 s live default** rather than PurpleAir's 10 s floor:
+detection latency is dominated by that 19–43 s cadence, so polling at 10 s
+would shave ~5 s off the budget while giving up the documented margin.
+`MIN_SCAN_INTERVAL_S` (15 s) applies to both intervals.
+
+Live values are also quantized to whole µg/m³, so at ~2 µg/m³ the AQI
+oscillates between 4 and 13 on quantization alone. Automations should
+trigger on a sustained change (`for:`, or a filter/derivative helper),
+never a single reading.
 
 ### Config flow
 

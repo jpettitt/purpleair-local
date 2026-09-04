@@ -25,6 +25,7 @@ from custom_components.purpleair_local.const import (
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
     DOMAIN,
 )
+from custom_components.purpleair_local.coordinator import PurpleAirRuntime
 from custom_components.purpleair_local.models import SensorReading
 
 
@@ -34,6 +35,9 @@ def _coordinator(payload: dict, *, last_update_success: bool = True):
     coord.data = reading
     coord.client = MagicMock(host="10.0.0.1")
     coord.last_update_success = last_update_success
+    # See the note in test_sensor._coordinator — a bare MagicMock
+    # attribute would be truthy and mis-suffix every unique_id.
+    coord.live = False
     return coord
 
 
@@ -140,7 +144,9 @@ async def test_single_laser_skips_disagreement_entity(
     )
     entry.add_to_hass(hass)
     coord = _coordinator(indoor_payload)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = PurpleAirRuntime(
+        averaged=coord
+    )
 
     added: list = []
 
@@ -164,7 +170,9 @@ async def test_dual_laser_creates_both_entities(
     )
     entry.add_to_hass(hass)
     coord = _coordinator(outdoor_payload)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = PurpleAirRuntime(
+        averaged=coord
+    )
 
     added: list = []
 
@@ -193,7 +201,9 @@ async def test_dual_laser_uses_option_thresholds(
     )
     entry.add_to_hass(hass)
     coord = _coordinator(outdoor_payload)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = PurpleAirRuntime(
+        averaged=coord
+    )
 
     added: list = []
 

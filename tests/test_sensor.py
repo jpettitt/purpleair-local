@@ -40,13 +40,17 @@ from custom_components.purpleair_local.models import SensorReading
 from custom_components.purpleair_local.sensor import build_entities
 
 
-def _coordinator(payload: dict, host: str = "192.168.0.1"):
+def _coordinator(payload: dict, host: str = "192.168.0.1", *, live: bool = False):
     """Build a stub coordinator with .data populated, no real HA needed."""
     reading = SensorReading.from_payload(payload)
     coord = MagicMock()
     coord.data = reading
     coord.client = MagicMock()
     coord.client.host = host
+    # Must be set explicitly: PurpleAirEntity reads `.live` to pick the
+    # unique_id suffix, and a bare MagicMock attribute is truthy, which
+    # would silently give every entity the "_live" suffix.
+    coord.live = live
     # CoordinatorEntity reaches into these in __init__ for listener setup;
     # MagicMock auto-handles them but make the read of `data` stable.
     return coord
@@ -564,3 +568,99 @@ def _dual_payload(
         payload["current_dewpoint_f"] = 50.0
         payload["pressure"] = 1013.0
     return payload
+
+
+# --- live entities --------------------------------------------------------
+
+
+def test_averaged_unique_ids_are_unchanged_by_the_live_feature(
+    outdoor_payload,
+):
+    """Regression guard: averaged ids are recorder history keys.
+
+    Adding live entities must not perturb a single existing unique_id —
+    if one changes, every affected entity is orphaned in the registry
+    and its history silently starts over. This pins the full dual-laser
+    set (the widest catalog) rather than a sample.
+    """
+    entities = build_entities(_coordinator(outdoor_payload), options={})
+    sid = outdoor_payload["SensorId"]
+
+    expected = set()
+    for channel in ("primary", "a", "b"):
+        for field in ("pm1_0_atm", "pm2_5_atm", "pm10_0_atm"):
+            expected.add(f"{sid}_{channel}_{field}")
+        for correction in ("raw", "epa"):
+            expected.add(f"{sid}_{channel}_aqi_{correction}")
+    for field in (
+        "p_0_3_um",
+        "p_0_5_um",
+        "p_1_0_um",
+        "p_2_5_um",
+        "p_5_0_um",
+        "p_10_0_um",
+    ):
+        expected.add(f"{sid}_primary_count_{field}")
+    for key in ("temperature", "humidity", "dewpoint", "pressure"):
+        expected.add(f"{sid}_env_{key}")
+    for key in ("rssi", "uptime", "free_heap", "firmware", "last_seen"):
+        expected.add(f"{sid}_diag_{key}")
+
+    assert {e.unique_id for e in entities} == expected
+    assert not any("_live" in e.unique_id for e in entities)
+
+
+def test_live_build_is_measurements_only(indoor_payload):
+    """No environment or diagnostic twins — identical data on both endpoints."""
+    live = build_entities(
+        _coordinator(indoor_payload, live=True), options={}
+    )
+    ids = {e.unique_id for e in live}
+
+    # 3 PM + 2 AQI (raw+EPA defaults) + 6 particle bins = 11
+    assert len(live) == 11
+    assert not any("_env_" in i for i in ids)
+    assert not any("_diag_" in i for i in ids)
+
+
+def test_live_entities_are_suffixed(indoor_payload):
+    live = build_entities(
+        _coordinator(indoor_payload, live=True), options={}
+    )
+    sid = indoor_payload["SensorId"]
+
+    assert all(e.unique_id.endswith("_live") for e in live)
+    assert f"{sid}_primary_pm2_5_atm_live" in {e.unique_id for e in live}
+    assert all(e.name.endswith(" (live)") for e in live)
+
+
+def test_live_is_primary_only_on_dual_laser(outdoor_payload):
+    """Per-channel entities diagnose a slow drift; live is for latency."""
+    live = build_entities(
+        _coordinator(outdoor_payload, live=True), options={}
+    )
+    ids = {e.unique_id for e in live}
+
+    assert len(live) == 11  # same count as single-laser: primary only
+    assert not any("_a_" in i or "_b_" in i for i in ids)
+
+
+def test_live_and_averaged_ids_never_collide(outdoor_payload):
+    averaged = build_entities(_coordinator(outdoor_payload), options={})
+    live = build_entities(
+        _coordinator(outdoor_payload, live=True), options={}
+    )
+
+    assert not ({e.unique_id for e in averaged} & {e.unique_id for e in live})
+
+
+def test_live_aqi_follows_the_selected_corrections(indoor_payload):
+    """Live honours the user's correction choice, same as averaged."""
+    live = build_entities(
+        _coordinator(indoor_payload, live=True),
+        options={CONF_AQI_CORRECTIONS: [AQI_CORRECTION_LRAPA]},
+    )
+    sid = indoor_payload["SensorId"]
+    aqi_ids = {i for i in (e.unique_id for e in live) if "_aqi_" in i}
+
+    assert aqi_ids == {f"{sid}_primary_aqi_lrapa_live"}

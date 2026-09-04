@@ -7,18 +7,22 @@ On `async_setup_entry`:
   3. Run an initial refresh so platforms have data to build entities
      from. If that fails we raise `ConfigEntryNotReady` and HA
      retries setup later.
-  4. Stash the coordinator under `hass.data[DOMAIN][entry_id]` so
-     `sensor.py`'s setup can pick it up.
-  5. Forward setup to the sensor platform.
-  6. Register an options-update listener so reconfiguration via the
-     options flow reloads the entry and the coordinator is rebuilt
-     with the new host / interval.
+  4. If the user enabled live entities, build a *second* coordinator
+     on `?live=true` at its own (shorter) interval.
+  5. Stash both under `hass.data[DOMAIN][entry_id]` as a
+     `PurpleAirRuntime` so the platforms can pick them up.
+  6. Forward setup to the sensor platform.
+  7. Register an options-update listener so reconfiguration via the
+     options flow reloads the entry and the coordinators are rebuilt
+     with the new host / intervals.
 
 Entity unique_ids are derived from the sensor's MAC (SensorId) — the
 host can change (DHCP) without breaking entity identity.
 """
 
 from __future__ import annotations
+
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
@@ -27,12 +31,18 @@ from homeassistant.helpers import aiohttp_client
 
 from .api import PurpleAirClient
 from .const import (
+    CONF_LIVE_ENTITIES,
+    CONF_LIVE_SCAN_INTERVAL_S,
     CONF_SCAN_INTERVAL_S,
+    DEFAULT_LIVE_ENTITIES,
+    DEFAULT_LIVE_SCAN_INTERVAL_S,
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import PurpleAirCoordinator
+from .coordinator import PurpleAirCoordinator, PurpleAirRuntime
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -50,7 +60,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # rather than entering the loaded state with no data.
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    runtime = PurpleAirRuntime(averaged=coordinator)
+
+    if entry.options.get(CONF_LIVE_ENTITIES, DEFAULT_LIVE_ENTITIES):
+        live_coordinator = PurpleAirCoordinator(
+            hass,
+            PurpleAirClient(entry.data[CONF_HOST], session),
+            config_entry=entry,
+            scan_interval_s=entry.options.get(
+                CONF_LIVE_SCAN_INTERVAL_S, DEFAULT_LIVE_SCAN_INTERVAL_S
+            ),
+            live=True,
+        )
+        # Deliberately async_refresh, not async_config_entry_first_refresh:
+        # a live-endpoint failure must not raise ConfigEntryNotReady and
+        # take the averaged entities down with it.
+        await live_coordinator.async_refresh()
+        if live_coordinator.last_update_success:
+            runtime.live = live_coordinator
+        else:
+            # Entity construction reads coordinator.data, so there is
+            # nothing to build from. Averaged entities still set up; the
+            # live set appears on the next reload or restart.
+            _LOGGER.warning(
+                "purpleair %s: live entities enabled but the first "
+                "?live=true poll failed (%s); skipping live entities "
+                "until the next reload",
+                entry.data[CONF_HOST],
+                live_coordinator.last_exception,
+            )
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

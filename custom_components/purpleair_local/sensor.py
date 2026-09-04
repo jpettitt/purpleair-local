@@ -91,7 +91,7 @@ from .const import (
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
     DOMAIN,
 )
-from .coordinator import PurpleAirCoordinator
+from .coordinator import PurpleAirCoordinator, PurpleAirRuntime
 from .entity import PurpleAirEntity
 from .models import SensorReading, channels_disagree
 
@@ -250,8 +250,12 @@ class _PmMassEntity(PurpleAirEntity, SensorEntity):
         self._disagreement_min_diff_ugm3 = disagreement_min_diff_ugm3
         self._disagreement_min_pct = disagreement_min_pct
         self._attr_device_class = device_class
-        self._attr_unique_id = f"{self._sensor_id}_{channel}_{atm_field}"
-        self._attr_name = _label_with_channel(short_name, channel)
+        self._attr_unique_id = (
+            f"{self._sensor_id}_{channel}_{atm_field}{self._id_suffix}"
+        )
+        self._attr_name = (
+            _label_with_channel(short_name, channel) + self._name_suffix
+        )
 
     @property
     def native_value(self) -> float | None:
@@ -354,10 +358,11 @@ class _AqiEntity(PurpleAirEntity, SensorEntity):
         self._disagreement_min_pct = disagreement_min_pct
         self._color_scheme = color_scheme
         self._attr_unique_id = (
-            f"{self._sensor_id}_{channel}_aqi_{correction}"
+            f"{self._sensor_id}_{channel}_aqi_{correction}{self._id_suffix}"
         )
-        self._attr_name = _label_with_channel(
-            _AQI_LABELS[correction], channel
+        self._attr_name = (
+            _label_with_channel(_AQI_LABELS[correction], channel)
+            + self._name_suffix
         )
 
     def _corrected_pm(self) -> float | None:
@@ -458,8 +463,10 @@ class _ParticleCountEntity(PurpleAirEntity, SensorEntity):
         self._field = field
         self._disagreement_min_diff_ugm3 = disagreement_min_diff_ugm3
         self._disagreement_min_pct = disagreement_min_pct
-        self._attr_unique_id = f"{self._sensor_id}_primary_count_{field}"
-        self._attr_name = short_name
+        self._attr_unique_id = (
+            f"{self._sensor_id}_primary_count_{field}{self._id_suffix}"
+        )
+        self._attr_name = short_name + self._name_suffix
 
     @property
     def native_value(self) -> float | None:
@@ -611,18 +618,34 @@ def _label_with_channel(base: str, channel: str) -> str:
 def build_entities(
     coordinator: PurpleAirCoordinator, options: dict[str, Any]
 ) -> list[SensorEntity]:
-    """Build the full entity list for one configured sensor.
+    """Build the entity list for one coordinator.
 
     Reads `coordinator.data` (which `async_setup_entry` guarantees is
     populated via `async_config_entry_first_refresh`) and the user's
     options dict to decide which AQI corrections to expose. Skips
     environment entities whose source field is absent.
+
+    Which set gets built is taken from `coordinator.live` rather than a
+    separate argument — the entity unique_id suffix comes from the same
+    place, and a caller that could set the two independently could
+    silently produce `_live`-suffixed environment twins.
+
+    For a live coordinator the set is deliberately a subset:
+
+      - **Measurements only.** Environment and diagnostic fields are
+        identical on both endpoints (the BME and status values don't
+        participate in the 2-minute averaging), so live twins of those
+        would be duplicate entities.
+      - **Primary channel only.** Per-channel entities exist to expose a
+        failing laser, which is a slow-drift judgement better made on
+        averaged data; live exists for latency on the headline number.
     """
     reading = coordinator.data
+    live = coordinator.live
     entities: list[SensorEntity] = []
 
     channels: list[str] = [_CHANNEL_PRIMARY]
-    if reading.is_dual_channel:
+    if reading.is_dual_channel and not live:
         channels += [_CHANNEL_A, _CHANNEL_B]
 
     # Pull disagreement thresholds once. The per-channel A / B
@@ -684,6 +707,11 @@ def build_entities(
                 disagreement_min_pct=disagreement_min_pct,
             )
         )
+
+    # The live set stops here: everything below reads fields the
+    # firmware returns identically on both endpoints.
+    if live:
+        return entities
 
     # Environment (each created only if its source field is present)
     if reading.environment is not None:
@@ -762,5 +790,9 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: PurpleAirCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(build_entities(coordinator, dict(entry.options)))
+    runtime: PurpleAirRuntime = hass.data[DOMAIN][entry.entry_id]
+    options = dict(entry.options)
+    entities = build_entities(runtime.averaged, options)
+    if runtime.live is not None:
+        entities += build_entities(runtime.live, options)
+    async_add_entities(entities)

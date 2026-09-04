@@ -55,6 +55,49 @@ Per configured sensor:
 Single-laser sensors (some indoor PA-II units) skip the channel-B
 entities and the disagreement binary sensor automatically.
 
+## Live entities (optional)
+
+> **Ships in v0.2.0 — currently in beta.** To try it, turn on
+> *Show beta versions* in HACS (⋮ on the PurpleAir Local entry →
+> Redownload → toggle it), pick a `0.2.0bN` release, and restart Home
+> Assistant.
+
+By default the integration reads the sensor's averaged endpoint, which
+updates every two minutes. If you're driving an automation that needs to
+react to a smoke plume quickly — shutting down mechanical ventilation,
+closing a window vent — turn on **Add live (unaveraged) entities** in the
+options flow.
+
+This is additive. You get a second set of PM, AQI and particle-count
+entities suffixed `_live`, polled every 15 seconds by default, *alongside*
+the averaged ones. Nothing is replaced, so your existing history and
+statistics keep accumulating from the averaged series.
+
+Live entities are primary-channel only, and there are no live twins of
+the temperature/humidity/pressure or diagnostic entities — the sensor
+returns identical values for those on both endpoints.
+
+**Live readings are noisy.** The firmware reports whole µg/m³, so at low
+concentrations the AQI can swing between 4 and 13 from one reading to the
+next with no real change in air quality. Measured on a PA-II, a new PM
+value only appears every ~19 seconds anyway (up to 43), so polling faster
+than the 15 s default mostly returns repeats. Trigger on a sustained
+change, not a single reading:
+
+```yaml
+automation:
+  - alias: Shut down MVHR on outdoor smoke
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.outdoor_0119_pm2_5_live
+        above: 35
+        for: "00:01:00"   # sustained, so one noisy sample can't trip it
+    action:
+      - action: fan.turn_off
+        target:
+          entity_id: fan.mvhr
+```
+
 ## Install
 
 The quick way — two clicks if your Home Assistant browser session is
