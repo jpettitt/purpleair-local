@@ -21,14 +21,20 @@
     "step": {
       "init": {
         "title": "PurpleAir Local options",
-        "description": "Change the sensor's IP (the unique sensor ID will be re-verified), polling cadence, which AQI corrections to expose as entities, or the channel-disagreement thresholds.",
+        "description": "Change the sensor's IP (the unique sensor ID will be re-verified), polling cadence, live entities, which AQI corrections to expose as entities, or the channel-disagreement thresholds.",
         "data": {
           "host": "IP address or hostname",
           "scan_interval_s": "Polling interval (seconds)",
+          "live_entities": "Add live (unaveraged) entities",
+          "live_scan_interval_s": "Live polling interval (seconds)",
           "aqi_corrections": "AQI corrections to expose",
           "aqi_color_scheme": "AQI category & color scheme (drives the `category` and `category_color` attributes on each AQI entity)",
           "channel_disagreement_min_diff_ugm3": "Channel disagreement: minimum absolute difference (µg/m³)",
           "channel_disagreement_min_pct": "Channel disagreement: minimum relative difference (%)"
+        },
+        "data_description": {
+          "live_entities": "Adds a second set of PM, AQI and particle-count entities read from the sensor's live endpoint, alongside the averaged ones — nothing is replaced. Reacts to smoke faster, but is noisy: the firmware reports whole µg/m³, so trigger on a sustained change rather than a single reading.",
+          "live_scan_interval_s": "Only used when live entities are on. The sensor produces a new PM value roughly every 15–20 seconds, so polling faster than that mostly returns repeats."
         }
       }
     },

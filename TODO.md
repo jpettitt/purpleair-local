@@ -107,8 +107,30 @@ landable on its own.
   `ignore: brands` in `.github/workflows/validate.yml`. Drop the
   ignore once the HACS validator recognizes in-tree brand dirs.
 
+## Before releasing v0.2.0 final
+
+- Remove the beta callout from the "Live entities (optional)" section
+  of [README.md](README.md) once v0.2.0 ships as a normal release —
+  it points users at HACS _Show beta versions_, which is wrong the
+  moment the stable tag exists.
+- Confirm live entities behaved over a longer run than the testbed
+  smoke test (no unique_id churn, no runaway polling, live coordinator
+  recovering cleanly after the sensor drops a request).
+
 ## Post-v0.1.0 (not committed)
 
+- **Live (`?live=true`) entities** — requested in
+  [#7](https://github.com/jpettitt/purpleair-local/issues/7) for an MVHR
+  smoke-shutdown automation.
+  _Done on `issue-7-live-entities`: additive rather than a mode switch —
+  a second coordinator on `?live=true` feeds `_live`-suffixed PM / AQI /
+  particle entities alongside the averaged ones, primary channel only,
+  no environment or diagnostic twins. Options flow gains a toggle and a
+  separate live interval (default 15 s, same 15 s floor). Averaged
+  unique_ids pinned by a regression test so history can't be orphaned.
+  Diagnostics dumps both coordinators. 16 new tests (234 total).
+  Endpoint cadence measured on the real dual-laser unit — see the "Live
+  entities" section in DESIGN.md for why 15 s and not 10 s._
 - **AQI category + color as entity attributes** — add
   `extra_state_attributes` on each `_AqiEntity` exposing `category`
   (`good` / `moderate` / `unhealthy_for_sensitive_groups` /
@@ -121,7 +143,6 @@ landable on its own.
   `device_color` (uses pre-2024 EPA breakpoints, same caveat as the
   on-device AQI value). Ship as v0.1.1.
 - Zeroconf discovery if PA firmware ever advertises one.
-- `?live=true` toggle per sensor.
 - Multi-sensor "site average" derived entity (outdoor average of all
   outdoor sensors).
 - 5-piece extended EPA correction (the piecewise formula AirNow Fire

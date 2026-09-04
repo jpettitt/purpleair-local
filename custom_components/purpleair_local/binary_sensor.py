@@ -92,7 +92,11 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: PurpleAirCoordinator = hass.data[DOMAIN][entry.entry_id]
+    # Both binary sensors are averaged-only. `online` reflects the
+    # canonical series (a live-endpoint hiccup shouldn't read as the
+    # device being down), and channel disagreement is a slow-drift
+    # judgement that raw single samples would only add noise to.
+    coordinator: PurpleAirCoordinator = hass.data[DOMAIN][entry.entry_id].averaged
     entities: list[BinarySensorEntity] = [_OnlineBinarySensor(coordinator)]
 
     if coordinator.data.is_dual_channel:

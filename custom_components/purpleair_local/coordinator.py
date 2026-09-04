@@ -4,6 +4,13 @@ One coordinator per sensor IP. Keeping them separate means a failing
 sensor never stalls reads on the healthy ones, and each can have its
 own scan interval if the options flow ever exposes per-sensor tuning.
 
+A config entry may run *two* of these against the same sensor: the
+averaged one (`GET /json`, the canonical series) and, when the user
+enables live entities, a second one on `?live=true` at a shorter
+interval. They are deliberately independent — a live-endpoint failure
+must not blank the averaged entities, so only the averaged coordinator
+gates entry setup.
+
 Errors from the HTTP layer (`PurpleAirError` subclasses) and parse
 errors (`ValueError` from `SensorReading.from_payload`) both get
 translated to HA's standard `UpdateFailed` so entities transition to
@@ -14,6 +21,7 @@ machinery.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -41,15 +49,20 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
         *,
         config_entry: ConfigEntry | None = None,
         scan_interval_s: int = DEFAULT_SCAN_INTERVAL_S,
+        live: bool = False,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             config_entry=config_entry,
-            name=f"{DOMAIN} {client.host}",
+            # The suffix keeps the two coordinators for one sensor
+            # distinguishable in debug logs and in HA's own scheduler
+            # bookkeeping.
+            name=f"{DOMAIN} {client.host}{' live' if live else ''}",
             update_interval=timedelta(seconds=scan_interval_s),
         )
         self.client = client
+        self.live = live
         # Kept around between polls so the diagnostics download can
         # include the exact bytes the sensor returned, not just the
         # parsed dataclass — useful when a bug report concerns a
@@ -59,7 +72,7 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
 
     async def _async_update_data(self) -> SensorReading:
         try:
-            payload = await self.client.get_reading()
+            payload = await self.client.get_reading(live=self.live)
         except PurpleAirError as err:
             # PurpleAirError is the union of connection / timeout /
             # invalid-response; the specific type is already in `err`'s
@@ -78,3 +91,17 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
             ) from err
         self.last_raw_payload = payload
         return reading
+
+
+@dataclass(slots=True)
+class PurpleAirRuntime:
+    """Everything one config entry owns, stored in `hass.data`.
+
+    `live` is None unless the user enabled live entities — and also
+    when the live coordinator's first poll failed, since entity
+    construction reads `coordinator.data`. Averaged is never None: its
+    first refresh gates entry setup.
+    """
+
+    averaged: PurpleAirCoordinator
+    live: PurpleAirCoordinator | None = None

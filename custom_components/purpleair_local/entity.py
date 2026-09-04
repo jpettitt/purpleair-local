@@ -36,6 +36,14 @@ class PurpleAirEntity(CoordinatorEntity[PurpleAirCoordinator]):
         super().__init__(coordinator)
         reading = coordinator.data
         self._sensor_id = reading.sensor_id
+        # Live entities are additive, so they need distinct ids from
+        # their averaged twins. Deriving both suffixes from the
+        # coordinator (rather than a kwarg on every subclass) keeps
+        # them impossible to get out of sync, and leaves the averaged
+        # ids byte-identical to what shipped in v0.1 — changing those
+        # would orphan every user's recorder history.
+        self._id_suffix = "_live" if coordinator.live else ""
+        self._name_suffix = " (live)" if coordinator.live else ""
         clean_mac = reading.sensor_id.replace(":", "")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, reading.sensor_id)},

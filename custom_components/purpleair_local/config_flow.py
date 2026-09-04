@@ -25,6 +25,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -56,11 +57,15 @@ from .const import (
     CONF_AQI_CORRECTIONS,
     CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
+    CONF_LIVE_ENTITIES,
+    CONF_LIVE_SCAN_INTERVAL_S,
     CONF_SCAN_INTERVAL_S,
     DEFAULT_AQI_COLOR_SCHEME,
     DEFAULT_AQI_CORRECTIONS,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+    DEFAULT_LIVE_ENTITIES,
+    DEFAULT_LIVE_SCAN_INTERVAL_S,
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
     MAX_SCAN_INTERVAL_S,
@@ -210,11 +215,17 @@ _COLOR_SCHEME_OPTION_LABELS: tuple[tuple[str, str], ...] = (
 class PurpleAirOptionsFlow(OptionsFlow):
     """Editable settings for a configured sensor.
 
-    Single-step flow with four fields:
+    Single-step flow with six fields:
       - Host (validated against the entry's unique SensorId on change,
         so users can recover from DHCP IP changes without removing the
         entry and losing entity history).
       - Scan interval, bounded by [MIN, MAX]_SCAN_INTERVAL_S.
+      - Live entities on/off, and their own (shorter) scan interval.
+        Additive: enabling adds a second set of measurement entities
+        fed by `?live=true`, it never replaces the averaged ones. The
+        interval field stays visible when the toggle is off — HA's
+        options schema is static, so hiding it would need a second
+        step for little gain.
       - Which AQI corrections to expose as entities. Multi-select;
         empty selection is allowed (some users may not want AQI
         entities at all).
@@ -263,6 +274,12 @@ class PurpleAirOptionsFlow(OptionsFlow):
                         CONF_SCAN_INTERVAL_S: int(
                             user_input[CONF_SCAN_INTERVAL_S]
                         ),
+                        CONF_LIVE_ENTITIES: bool(
+                            user_input[CONF_LIVE_ENTITIES]
+                        ),
+                        CONF_LIVE_SCAN_INTERVAL_S: int(
+                            user_input[CONF_LIVE_SCAN_INTERVAL_S]
+                        ),
                         CONF_AQI_CORRECTIONS: list(
                             user_input[CONF_AQI_CORRECTIONS]
                         ),
@@ -300,6 +317,16 @@ class PurpleAirOptionsFlow(OptionsFlow):
         scan_default = cur.get(
             CONF_SCAN_INTERVAL_S,
             opts.get(CONF_SCAN_INTERVAL_S, DEFAULT_SCAN_INTERVAL_S),
+        )
+        live_default = cur.get(
+            CONF_LIVE_ENTITIES,
+            opts.get(CONF_LIVE_ENTITIES, DEFAULT_LIVE_ENTITIES),
+        )
+        live_interval_default = cur.get(
+            CONF_LIVE_SCAN_INTERVAL_S,
+            opts.get(
+                CONF_LIVE_SCAN_INTERVAL_S, DEFAULT_LIVE_SCAN_INTERVAL_S
+            ),
         )
         aqi_default = list(
             cur.get(
@@ -340,6 +367,22 @@ class PurpleAirOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SCAN_INTERVAL_S,
                     default=scan_default,
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_SCAN_INTERVAL_S,
+                        max=MAX_SCAN_INTERVAL_S,
+                        step=1,
+                        unit_of_measurement="s",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_LIVE_ENTITIES,
+                    default=live_default,
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_LIVE_SCAN_INTERVAL_S,
+                    default=live_interval_default,
                 ): NumberSelector(
                     NumberSelectorConfig(
                         min=MIN_SCAN_INTERVAL_S,

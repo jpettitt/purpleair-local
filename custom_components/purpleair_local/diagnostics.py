@@ -9,6 +9,8 @@ device or config-entry page. Includes:
   - The most recent **raw** /json payload (redacted) — more useful in
     bug reports than the parsed dataclass because it preserves any
     firmware fields we haven't accounted for.
+  - The same two for the live (`?live=true`) coordinator, or null when
+    live entities are disabled.
 
 Redaction
 ---------
@@ -28,7 +30,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import PurpleAirCoordinator
+from .coordinator import PurpleAirCoordinator, PurpleAirRuntime
 
 # Keys to scrub anywhere they appear in the diagnostics tree. The set
 # spans both our own config-entry shape (`host`) and the firmware's
@@ -42,14 +44,12 @@ _TO_REDACT: frozenset[str] = frozenset(
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
-    coordinator: PurpleAirCoordinator = hass.data[DOMAIN][entry.entry_id]
+    runtime: PurpleAirRuntime = hass.data[DOMAIN][entry.entry_id]
+    coordinator = runtime.averaged
 
-    interval_s = (
-        coordinator.update_interval.total_seconds()
-        if coordinator.update_interval is not None
-        else None
-    )
-
+    # The `coordinator` / `last_raw_payload` keys keep their original
+    # meaning (the averaged series) so older bug reports stay
+    # comparable; the live pair is null when live entities are off.
     return {
         "entry": {
             "data": async_redact_data(dict(entry.data), _TO_REDACT),
@@ -59,16 +59,36 @@ async def async_get_config_entry_diagnostics(
             # already leaks the fact that a given MAC is registered.
             "unique_id": "**REDACTED**" if entry.unique_id else None,
         },
-        "coordinator": {
-            "last_update_success": coordinator.last_update_success,
-            "last_exception": (
-                str(coordinator.last_exception)
-                if coordinator.last_exception is not None
-                else None
-            ),
-            "update_interval_s": interval_s,
-        },
+        "coordinator": _coordinator_health(coordinator),
         "last_raw_payload": _redact_payload(coordinator.last_raw_payload),
+        "live_coordinator": (
+            _coordinator_health(runtime.live)
+            if runtime.live is not None
+            else None
+        ),
+        "live_last_raw_payload": (
+            _redact_payload(runtime.live.last_raw_payload)
+            if runtime.live is not None
+            else None
+        ),
+    }
+
+
+def _coordinator_health(
+    coordinator: PurpleAirCoordinator,
+) -> dict[str, Any]:
+    return {
+        "last_update_success": coordinator.last_update_success,
+        "last_exception": (
+            str(coordinator.last_exception)
+            if coordinator.last_exception is not None
+            else None
+        ),
+        "update_interval_s": (
+            coordinator.update_interval.total_seconds()
+            if coordinator.update_interval is not None
+            else None
+        ),
     }
 
 

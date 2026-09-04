@@ -93,6 +93,39 @@ async def test_coordinator_malformed_payload_marks_update_failed(hass):
     assert "malformed" in str(coord.last_exception).lower()
 
 
+async def test_coordinator_defaults_to_averaged_endpoint(hass, indoor_payload):
+    """The canonical series must stay on /json, not ?live=true."""
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+
+    coord = PurpleAirCoordinator(hass, client)
+    await coord.async_refresh()
+
+    assert coord.live is False
+    client.get_reading.assert_awaited_once_with(live=False)
+
+
+async def test_coordinator_live_requests_live_endpoint(hass, indoor_payload):
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+
+    coord = PurpleAirCoordinator(hass, client, live=True)
+    await coord.async_refresh()
+
+    assert coord.live is True
+    client.get_reading.assert_awaited_once_with(live=True)
+
+
+async def test_live_coordinator_name_distinguishes_it(hass):
+    """Two coordinators on one host must be tellable apart in logs."""
+    client = _fake_client()
+    averaged = PurpleAirCoordinator(hass, client)
+    live = PurpleAirCoordinator(hass, client, live=True)
+
+    assert averaged.name != live.name
+    assert live.name.endswith(" live")
+
+
 async def test_coordinator_scan_interval_default(hass):
     client = _fake_client()
     coord = PurpleAirCoordinator(hass, client)

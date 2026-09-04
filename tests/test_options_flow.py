@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.const import CONF_HOST
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -31,11 +32,15 @@ from custom_components.purpleair_local.const import (
     CONF_AQI_CORRECTIONS,
     CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     CONF_CHANNEL_DISAGREEMENT_MIN_PCT,
+    CONF_LIVE_ENTITIES,
+    CONF_LIVE_SCAN_INTERVAL_S,
     CONF_SCAN_INTERVAL_S,
     DEFAULT_AQI_COLOR_SCHEME,
     DEFAULT_AQI_CORRECTIONS,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
     DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+    DEFAULT_LIVE_ENTITIES,
+    DEFAULT_LIVE_SCAN_INTERVAL_S,
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
 )
@@ -100,6 +105,8 @@ async def test_options_form_uses_defaults_when_no_prior_options(
     schema_dict = {k.schema: k.default() for k in result["data_schema"].schema}
     assert schema_dict[CONF_HOST] == _HOST
     assert schema_dict[CONF_SCAN_INTERVAL_S] == DEFAULT_SCAN_INTERVAL_S
+    assert schema_dict[CONF_LIVE_ENTITIES] is False
+    assert schema_dict[CONF_LIVE_SCAN_INTERVAL_S] == DEFAULT_LIVE_SCAN_INTERVAL_S
     assert schema_dict[CONF_AQI_CORRECTIONS] == list(DEFAULT_AQI_CORRECTIONS)
     assert (
         schema_dict[CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3]
@@ -116,6 +123,8 @@ async def test_options_form_prefilled_from_existing_options(
 ):
     existing = {
         CONF_SCAN_INTERVAL_S: 60,
+        CONF_LIVE_ENTITIES: True,
+        CONF_LIVE_SCAN_INTERVAL_S: 20,
         CONF_AQI_CORRECTIONS: [AQI_CORRECTION_EPA, AQI_CORRECTION_LRAPA],
         CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: 10.0,
         CONF_CHANNEL_DISAGREEMENT_MIN_PCT: 40.0,
@@ -126,6 +135,8 @@ async def test_options_form_prefilled_from_existing_options(
 
     schema_dict = {k.schema: k.default() for k in result["data_schema"].schema}
     assert schema_dict[CONF_SCAN_INTERVAL_S] == 60
+    assert schema_dict[CONF_LIVE_ENTITIES] is True
+    assert schema_dict[CONF_LIVE_SCAN_INTERVAL_S] == 20
     assert schema_dict[CONF_AQI_CORRECTIONS] == [
         AQI_CORRECTION_EPA,
         AQI_CORRECTION_LRAPA,
@@ -165,6 +176,11 @@ async def test_options_save_without_host_change_skips_probe(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {
         CONF_SCAN_INTERVAL_S: 30,
+        # Not submitted above — voluptuous fills these from the schema
+        # defaults, which is what an existing user who never touches
+        # the new fields will get on their next options save.
+        CONF_LIVE_ENTITIES: DEFAULT_LIVE_ENTITIES,
+        CONF_LIVE_SCAN_INTERVAL_S: DEFAULT_LIVE_SCAN_INTERVAL_S,
         CONF_AQI_CORRECTIONS: [
             AQI_CORRECTION_RAW,
             AQI_CORRECTION_EPA,
@@ -304,3 +320,74 @@ async def test_options_empty_aqi_corrections_is_allowed(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_AQI_CORRECTIONS] == []
+
+
+# --- live entities --------------------------------------------------------
+
+
+async def test_options_enabling_live_persists_toggle_and_interval(
+    hass, indoor_payload
+):
+    entry = _entry(hass, indoor_payload)
+
+    result = await _start_options_flow(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_HOST: _HOST,
+            CONF_SCAN_INTERVAL_S: DEFAULT_SCAN_INTERVAL_S,
+            CONF_LIVE_ENTITIES: True,
+            CONF_LIVE_SCAN_INTERVAL_S: 20,
+            CONF_AQI_CORRECTIONS: list(DEFAULT_AQI_CORRECTIONS),
+            CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+            CONF_CHANNEL_DISAGREEMENT_MIN_PCT: DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_LIVE_ENTITIES] is True
+    assert entry.options[CONF_LIVE_SCAN_INTERVAL_S] == 20
+
+
+async def test_options_live_interval_is_stored_as_int(hass, indoor_payload):
+    """NumberSelector hands back a float; the coordinator wants seconds as int."""
+    entry = _entry(hass, indoor_payload)
+
+    result = await _start_options_flow(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_HOST: _HOST,
+            CONF_SCAN_INTERVAL_S: DEFAULT_SCAN_INTERVAL_S,
+            CONF_LIVE_ENTITIES: True,
+            CONF_LIVE_SCAN_INTERVAL_S: 30.0,
+            CONF_AQI_CORRECTIONS: list(DEFAULT_AQI_CORRECTIONS),
+            CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+            CONF_CHANNEL_DISAGREEMENT_MIN_PCT: DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+        },
+    )
+
+    assert isinstance(entry.options[CONF_LIVE_SCAN_INTERVAL_S], int)
+    assert entry.options[CONF_LIVE_SCAN_INTERVAL_S] == 30
+
+
+async def test_options_live_interval_respects_the_scan_interval_floor(
+    hass, indoor_payload
+):
+    """Live shares the 15 s floor — below PurpleAir's 10 s guidance is refused."""
+    entry = _entry(hass, indoor_payload)
+
+    result = await _start_options_flow(hass, entry)
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: _HOST,
+                CONF_SCAN_INTERVAL_S: DEFAULT_SCAN_INTERVAL_S,
+                CONF_LIVE_ENTITIES: True,
+                CONF_LIVE_SCAN_INTERVAL_S: 5,
+                CONF_AQI_CORRECTIONS: list(DEFAULT_AQI_CORRECTIONS),
+                CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: DEFAULT_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3,
+                CONF_CHANNEL_DISAGREEMENT_MIN_PCT: DEFAULT_CHANNEL_DISAGREEMENT_MIN_PCT,
+            },
+        )
