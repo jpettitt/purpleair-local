@@ -122,6 +122,16 @@ landable on its own.
   and failure-tolerance changes are verified by unit tests and their
   log, not by local reproduction. Ask the reporter for a fresh debug
   log on the beta before calling it confirmed.
+- Write the v0.2.0 release notes as **one story spanning b1 and b2**,
+  not as a diff against b2. Stable users are coming from v0.1.1 and
+  never saw either pre-release, so the notes need the live-entities
+  feature _and_ the PA-II block-window handling together. A
+  `compare/v0.2.0b2...v0.2.0` changelog link would show almost
+  nothing — link `v0.1.1...v0.2.0` instead.
+- Close [#7](https://github.com/jpettitt/purpleair-local/issues/7) only
+  once the block-window fix is confirmed on hardware that reproduces
+  it. It was reopened after v0.2.0b1 for exactly this reason; don't let
+  the v0.2.0 tag auto-close it by accident.
 
 ## Post-v0.1.0 (not committed)
 
