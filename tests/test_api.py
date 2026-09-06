@@ -238,3 +238,71 @@ async def test_dropped_connection_is_retried(aiohttp_server, indoor_payload):
 
     assert result["SensorId"] == indoor_payload["SensorId"]
     assert counters["calls"] == 2
+
+
+# --- live requests are not retried ----------------------------------------
+
+
+async def test_live_timeout_is_not_retried(aiohttp_server, indoor_payload):
+    """A live timeout must cost exactly one request, not two.
+
+    Some PA-II units block ?live=true for ~30 s of every 120 s cycle, far
+    longer than the request timeout, so an immediate retry lands in the
+    same window: it doubles the stall and puts a second request on a
+    sensor already refusing to answer.
+    """
+    counters = {"calls": 0}
+
+    async def handler(_request: web.Request) -> web.Response:
+        counters["calls"] += 1
+        await asyncio.sleep(1.0)
+        return web.Response(
+            text=json.dumps(indoor_payload), content_type="text/html"
+        )
+
+    app = web.Application()
+    app.router.add_get("/json", handler)
+    server = await aiohttp_server(app)
+
+    async with aiohttp.ClientSession() as session:
+        client = PurpleAirClient(
+            f"127.0.0.1:{server.port}", session, timeout=0.1
+        )
+        with pytest.raises(PurpleAirTimeoutError):
+            await client.get_reading(live=True)
+
+    assert counters["calls"] == 1
+
+
+@pytest.mark.parametrize(
+    "live,expected_calls",
+    [(False, 4), (True, 2)],
+)
+async def test_live_halves_request_load_on_connection_drops(
+    aiohttp_server, live, expected_calls
+):
+    """Live spends half as many requests as averaged on a dead connection.
+
+    Note the counts aren't 2 and 1: aiohttp's connector transparently
+    retries a connection that drops before a response, so every attempt
+    *we* make costs two server-side calls. That's outside our control and
+    harmless — it isn't the block-window case. What we control is the
+    number of our own attempts, which this pins at 2 vs 1.
+    """
+    counters = {"calls": 0}
+
+    async def handler(request: web.Request) -> web.Response:
+        counters["calls"] += 1
+        request.transport.close()
+        return web.Response()  # never reached by client
+
+    app = web.Application()
+    app.router.add_get("/json", handler)
+    server = await aiohttp_server(app)
+
+    async with aiohttp.ClientSession() as session:
+        client = PurpleAirClient(f"127.0.0.1:{server.port}", session)
+        with pytest.raises(PurpleAirConnectionError):
+            await client.get_reading(live=live)
+
+    assert counters["calls"] == expected_calls
