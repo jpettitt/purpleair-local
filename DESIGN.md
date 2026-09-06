@@ -211,11 +211,23 @@ never a single reading.
 Reported on [#7](https://github.com/jpettitt/purpleair-local/issues/7)
 after v0.2.0b1 shipped, and characterised from a one-hour debug log.
 
-**Some PA-II units block `?live=true` for roughly 30 s of every 120 s
-cycle, then release every pending request at a fixed point in that
-cycle.** On the reporting unit (hardware 2.0, firmware 7.02, installed
-2018) the release point sat at ~90.5 s into the cycle, and requests
-arriving anywhere from ~60 s to ~86.5 s all completed there:
+**Root cause: `?live=true` blocks behind the sensor's once-per-120 s
+cloud upload.** Every PA-II uploads to PurpleAir (and to a Data
+Processor, if configured) on its `period` boundary. That upload is
+blocking, and the live endpoint waits for it. The averaged `/json` does
+not, because it serves the buffer the firmware has just computed rather
+than reading the sensor hardware — which is why the two endpoints
+behave so differently on the same device at the same moment.
+
+When uploads succeed in a few hundred milliseconds the stall is
+invisible. When one hangs, live hangs with it for exactly as long. So
+the "block window" is not a fixed firmware property and not a defect
+peculiar to certain units — **its width is however long that sensor's
+upload takes to fail.**
+
+On the reporting unit (hardware 2.0, firmware 7.02, installed 2018) the
+release point sat at ~90.5 s into the cycle, and requests arriving
+anywhere from ~60 s to ~86.5 s all completed there:
 
 | arrived (cycle phase) | waited | completed (cycle phase) |
 | --- | --- | --- |
@@ -228,8 +240,30 @@ Across 33 clean stalls the completion phase only ever landed in
 [91, 92]. It is endpoint-specific: the same device's averaged `/json`
 never exceeded **76 ms** across 41 fetches in the same log. A PurpleAir
 Flex (hardware 3.0, firmware 7.04) on the same network showed nothing —
-294 live polls, max 321 ms. A second PA-II on the same firmware 7.02
-also showed no block window, so this is **not** universal to the model.
+294 live polls, max 321 ms.
+
+**Demonstrated causally.** A PA-II here with healthy uploads showed one
+2.6 s stall in 90 polls. Blocking its internet access at the firewall —
+dropping packets rather than rejecting them — immediately produced
+repeated **15 s** stalls, while `httpsuccess` froze and `httpsends` kept
+climbing. The router log showed the cause: 7 TCP SYN retransmits at 3 s
+intervals, ~18 s per upload target, starting every 120 s. Restoring
+access returned the same sensor to 64 ms. A second unit here has a dead
+Data Processor endpoint and reports `response: -11`
+(`HTTPC_ERROR_READ_TIMEOUT`) with a steady **2.03 sends and 1.03
+successes per cycle** across 1787 cycles — it stalls permanently,
+without any firewall involvement.
+
+Two upload targets means two stalls per cycle: the unit with a Data
+Processor configured stalled roughly twice as often as the one without.
+
+**Diagnosing it on any sensor:** compare `httpsends` against
+`httpsuccess` in the payload. If sends outrun successes, that sensor has
+a failing upload and will stall its live endpoint by however long the
+failure takes. `response` carries the ESP8266 HTTP client error code for
+the Data Processor target, and `pa_latency` / `latency` the per-target
+upload times. Fixing the upload removes the stall at source; everything
+below only stops us making it worse.
 
 Consequences the implementation has to live with:
 
@@ -259,9 +293,11 @@ So the integration treats the window as something to *survive*:
    a genuinely dead sensor. Invalid responses are *not* ridden out;
    those are persistent, not transient.
 
-Neither is a workaround for a bug on our side — the delay is firmware
-behaviour on the device. What we control is not amplifying it and not
-reporting it to the user as an outage.
+Neither is a workaround for a bug on our side — the delay is the
+sensor's own blocking upload. What we control is not amplifying it and
+not reporting it to the user as an outage. The real fix, where a user
+can apply it, is on the sensor: a PA-II whose uploads succeed does not
+stall at all.
 
 ### Config flow
 

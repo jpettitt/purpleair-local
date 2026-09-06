@@ -77,17 +77,31 @@ Live entities are primary-channel only, and there are no live twins of
 the temperature/humidity/pressure or diagnostic entities — the sensor
 returns identical values for those on both endpoints.
 
-**Some PA-II units stall the live endpoint.** On certain PA-IIs (hardware
-2.0) the firmware stops answering `?live=true` for roughly 30 seconds out
-of every 120, then answers everything at once — so around a quarter of
-live polls come back slowly, and some time out. Not all units do it, no
-poll interval avoids it, and it doesn't affect the averaged entities at
-all. The integration absorbs it: live requests aren't retried (a retry
-lands in the same stall), and short runs of failures keep serving the last
-reading instead of dropping your entities to `unavailable`. If you see
-occasional gaps in the live history but the averaged entities are fine,
-this is what you're looking at — it's the sensor's firmware, not the
-integration.
+**A failing cloud upload will stall the live endpoint.** Once every 120
+seconds a PA-II uploads to the PurpleAir cloud, and to a Data Processor
+if you've configured one. That upload blocks, and `?live=true` waits
+behind it — the averaged entities are unaffected. When uploads succeed
+this costs a few hundred milliseconds and you'll never notice. When one
+*hangs* — packets dropped by a firewall, a dead Data Processor URL, DNS
+trouble — live requests hang with it, typically 15–30 seconds, once per
+cycle.
+
+The integration absorbs this: live requests aren't retried (the retry
+would land in the same stall), and short runs of failures keep serving
+the last reading rather than dropping your entities to `unavailable`.
+
+But if you're seeing gaps, it's worth fixing at the source. Open
+`http://<sensor-ip>/json` and compare two fields:
+
+- `httpsends` — upload attempts
+- `httpsuccess` — successful uploads
+
+If `httpsends` is climbing faster than `httpsuccess`, that sensor has a
+failing upload, and that's your stall. A sensor with a Data Processor
+configured also reports `response` (the HTTP client error code, e.g.
+`-11` for a read timeout) and `latency` for that target. Clearing the
+bad target — or removing the Data Processor URL if you no longer use it —
+removes the stall entirely.
 
 **Live readings are noisy.** The firmware reports whole µg/m³, so at low
 concentrations the AQI can swing between 4 and 13 from one reading to the

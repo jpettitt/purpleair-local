@@ -116,12 +116,19 @@ landable on its own.
 - Confirm live entities behaved over a longer run than the testbed
   smoke test (no unique_id churn, no runaway polling, live coordinator
   recovering cleanly after the sensor drops a request).
-- Confirm the PA-II block-window handling on a unit that actually
-  reproduces it. Neither of the maintainer's sensors does — the
-  characterisation came from a reporter's log on #7, so the no-retry
-  and failure-tolerance changes are verified by unit tests and their
-  log, not by local reproduction. Ask the reporter for a fresh debug
-  log on the beta before calling it confirmed.
+- Confirm the block-window handling against the **indoor sensor**, which
+  reproduces it permanently: its Data Processor target is dead, so it
+  reports `response: -11` (read timeout) and runs 2.03 sends / 1.03
+  successes per cycle, stalling `?live=true` every cycle. That makes it
+  a standing regression rig for this — no firewall games needed. (The
+  outdoor sensor has healthy uploads and does not stall; blocking its
+  internet access reproduces the fault on demand if a second unit is
+  ever wanted.)
+- Consider surfacing upload health as a diagnostic entity — an
+  `uploads_failing` binary sensor, or exposing the `httpsends` minus
+  `httpsuccess` delta. It's the single field that explains live stalls,
+  and users currently have to read raw JSON to find it. Would have
+  turned #7 into a self-diagnosis.
 - Write the v0.2.0 release notes as **one story spanning b1 and b2**,
   not as a diff against b2. Stable users are coming from v0.1.1 and
   never saw either pre-release, so the notes need the live-entities
