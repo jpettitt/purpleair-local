@@ -20,6 +20,18 @@ Connection and timeout errors are retried once inside the client because
 they're commonly transient on a residential LAN; an invalid response is
 not retried because it almost always reflects a persistent state (wrong
 host, wrong port, sensor in a weird mode).
+
+Live requests are the exception: they are not retried. Some PA-II units
+(hardware 2.0, firmware 7.02) block `?live=true` for roughly 30 s of
+every 120 s cycle and release all pending requests at a fixed point in
+that cycle. Measured on a reporter's 2018 unit: requests arriving
+anywhere from ~60 s to ~86 s into the cycle all completed at ~90.5 s,
+waiting between 30 s and 4 s accordingly, while the same device's
+averaged `/json` never exceeded 76 ms. A retry issued the instant the
+first attempt times out lands in the same block window, so it doubles
+the stall and adds load for no chance of success. Not every PA-II shows
+this — a second unit on the same firmware did not — so it is treated as
+something to survive, not something to detect.
 """
 
 from __future__ import annotations
@@ -86,27 +98,36 @@ class PurpleAirClient:
         """Fetch one reading from the sensor.
 
         Args:
-            live: when True, request `/json?live=true` (raw latest reading).
-                Defaults to False (two-minute averaged).
+            live: when True, request `/json?live=true` (raw latest reading)
+                and make a single attempt with no retry. Defaults to False
+                (two-minute averaged, retried once on a transient error).
 
         Returns:
             The parsed JSON payload as a dict.
 
         Raises:
-            PurpleAirConnectionError: network error reaching the sensor,
-                after one retry.
-            PurpleAirTimeoutError: request exceeded the configured timeout,
-                after one retry.
+            PurpleAirConnectionError: network error reaching the sensor —
+                after one retry when averaged, immediately when live.
+            PurpleAirTimeoutError: request exceeded the configured timeout —
+                after one retry when averaged, immediately when live.
             PurpleAirInvalidResponseError: HTTP status was >=400 or body
-                wasn't valid JSON. Not retried.
+                wasn't valid JSON. Never retried.
         """
+        # Live requests get one attempt, not two. Some PA-II units block
+        # ?live=true for ~30 s of every 120 s cycle (see the module
+        # docstring), which is far wider than the request timeout — so an
+        # immediate retry lands inside the same block and times out too.
+        # That turns a 10 s stall into a 20 s one and puts a second
+        # request on a sensor that is already refusing to answer. The
+        # averaged endpoint shows no such window, so it keeps the retry.
+        attempts = (1,) if live else (1, 2)
         last_transient: PurpleAirError | None = None
-        for attempt in (1, 2):
+        for attempt in attempts:
             try:
                 return await self._fetch_once(live=live)
             except (PurpleAirConnectionError, PurpleAirTimeoutError) as err:
                 last_transient = err
-                if attempt == 1:
+                if attempt < len(attempts):
                     _LOGGER.debug(
                         "purpleair %s: transient error on attempt 1, retrying: %s",
                         self._host,

@@ -116,6 +116,12 @@ landable on its own.
 - Confirm live entities behaved over a longer run than the testbed
   smoke test (no unique_id churn, no runaway polling, live coordinator
   recovering cleanly after the sensor drops a request).
+- Confirm the PA-II block-window handling on a unit that actually
+  reproduces it. Neither of the maintainer's sensors does — the
+  characterisation came from a reporter's log on #7, so the no-retry
+  and failure-tolerance changes are verified by unit tests and their
+  log, not by local reproduction. Ask the reporter for a fresh debug
+  log on the beta before calling it confirmed.
 
 ## Post-v0.1.0 (not committed)
 

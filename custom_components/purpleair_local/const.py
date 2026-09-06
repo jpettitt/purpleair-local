@@ -26,6 +26,21 @@ MAX_SCAN_INTERVAL_S = 3600  # 1 hour — beyond this the integration isn't reall
 # floor. Bounded by the same MIN/MAX as the averaged interval.
 DEFAULT_LIVE_SCAN_INTERVAL_S = 15
 
+# A live poll that fails must not immediately push entities to
+# `unavailable`. Some PA-II units block ?live=true for ~30 s of every
+# 120 s cycle, so isolated failures are expected firmware behaviour, not
+# an outage — and an automation watching a live PM entity is worse off
+# seeing `unavailable` than a value a few seconds stale.
+#
+# The tolerance is derived from the poll interval rather than being a
+# fixed count, so the grace period always spans more than this many
+# seconds no matter how fast the user polls (at 15 s that's 5 failures,
+# at 37 s it's 2). 60 s comfortably outlasts one ~30 s block window plus
+# scheduling jitter, while still surfacing a genuinely dead sensor
+# quickly. Only the live coordinator uses this — the averaged one keeps
+# failing fast, since it is the canonical series and backs `online`.
+LIVE_FAILURE_GRACE_S = 60
+
 # Default total timeout for a single HTTP call to the sensor. Healthy
 # sensors respond in well under 500 ms on a LAN; 10 s gives generous
 # headroom for a slow Wi-Fi cycle without making the coordinator hang.

@@ -155,3 +155,113 @@ async def test_coordinator_recovers_after_transient_failure(
     await coord.async_refresh()
     assert coord.last_update_success is True
     assert coord.data.sensor_id == indoor_payload["SensorId"]
+
+
+# --- live failure tolerance ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "interval,expected",
+    [
+        (15, 5),   # 75 s
+        (20, 4),   # 80 s
+        (30, 3),   # 90 s
+        (37, 2),   # 74 s
+        (60, 2),   # 120 s — 1 would be exactly 60 s, which isn't "more than"
+        (61, 1),   # 61 s
+        (120, 1),  # 120 s
+    ],
+)
+async def test_live_failure_tolerance_always_spans_over_60s(
+    hass, interval, expected
+):
+    """The grace period must exceed 60 s at every supported interval."""
+    coord = PurpleAirCoordinator(
+        hass, _fake_client(), scan_interval_s=interval, live=True
+    )
+    assert coord.max_consecutive_failures == expected
+    assert coord.max_consecutive_failures * interval > 60
+
+
+async def test_averaged_coordinator_has_no_failure_tolerance(hass):
+    """The canonical series fails fast — it backs `online`."""
+    coord = PurpleAirCoordinator(hass, _fake_client(), scan_interval_s=120)
+    assert coord.max_consecutive_failures == 0
+
+
+async def test_live_rides_out_transient_failures_serving_last_reading(
+    hass, indoor_payload
+):
+    """Entities must not flap to unavailable during the sensor's block window."""
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+    coord = PurpleAirCoordinator(hass, client, scan_interval_s=15, live=True)
+    await coord.async_refresh()
+    assert coord.last_update_success is True
+
+    client.get_reading.side_effect = PurpleAirTimeoutError("blocked")
+    for i in range(coord.max_consecutive_failures):
+        await coord.async_refresh()
+        assert coord.last_update_success is True, f"flapped on failure {i + 1}"
+        assert coord.data.sensor_id == indoor_payload["SensorId"]
+
+
+async def test_live_gives_up_after_the_grace_period(hass, indoor_payload):
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+    coord = PurpleAirCoordinator(hass, client, scan_interval_s=15, live=True)
+    await coord.async_refresh()
+
+    client.get_reading.side_effect = PurpleAirTimeoutError("still blocked")
+    for _ in range(coord.max_consecutive_failures):
+        await coord.async_refresh()
+    assert coord.last_update_success is True
+
+    # One past the allowance: now it's a real outage.
+    await coord.async_refresh()
+    assert coord.last_update_success is False
+
+
+async def test_live_failure_counter_resets_on_success(hass, indoor_payload):
+    """A good poll must clear the tally, not leave it primed to trip."""
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+    coord = PurpleAirCoordinator(hass, client, scan_interval_s=15, live=True)
+    await coord.async_refresh()
+
+    client.get_reading.side_effect = PurpleAirTimeoutError("blocked")
+    for _ in range(coord.max_consecutive_failures):
+        await coord.async_refresh()
+
+    client.get_reading.side_effect = None
+    await coord.async_refresh()
+    assert coord.last_update_success is True
+
+    # A fresh run of failures should get the full allowance again.
+    client.get_reading.side_effect = PurpleAirTimeoutError("blocked again")
+    for i in range(coord.max_consecutive_failures):
+        await coord.async_refresh()
+        assert coord.last_update_success is True, f"flapped on failure {i + 1}"
+
+
+async def test_live_invalid_response_is_not_ridden_out(hass, indoor_payload):
+    """Only transient errors get the grace period; a bad body is persistent."""
+    client = _fake_client()
+    client.get_reading.return_value = indoor_payload
+    coord = PurpleAirCoordinator(hass, client, scan_interval_s=15, live=True)
+    await coord.async_refresh()
+
+    client.get_reading.side_effect = PurpleAirInvalidResponseError("HTTP 500")
+    await coord.async_refresh()
+    assert coord.last_update_success is False
+
+
+async def test_live_with_no_prior_reading_fails_immediately(hass):
+    """Nothing to serve on the first poll, so the grace period can't apply."""
+    client = _fake_client()
+    client.get_reading.side_effect = PurpleAirTimeoutError("blocked")
+    coord = PurpleAirCoordinator(hass, client, scan_interval_s=15, live=True)
+
+    await coord.async_refresh()
+    assert coord.last_update_success is False
+    assert coord.data is None

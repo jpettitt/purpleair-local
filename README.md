@@ -77,6 +77,18 @@ Live entities are primary-channel only, and there are no live twins of
 the temperature/humidity/pressure or diagnostic entities — the sensor
 returns identical values for those on both endpoints.
 
+**Some PA-II units stall the live endpoint.** On certain PA-IIs (hardware
+2.0) the firmware stops answering `?live=true` for roughly 30 seconds out
+of every 120, then answers everything at once — so around a quarter of
+live polls come back slowly, and some time out. Not all units do it, no
+poll interval avoids it, and it doesn't affect the averaged entities at
+all. The integration absorbs it: live requests aren't retried (a retry
+lands in the same stall), and short runs of failures keep serving the last
+reading instead of dropping your entities to `unavailable`. If you see
+occasional gaps in the live history but the averaged entities are fine,
+this is what you're looking at — it's the sensor's firmware, not the
+integration.
+
 **Live readings are noisy.** The firmware reports whole µg/m³, so at low
 concentrations the AQI can swing between 4 and 13 from one reading to the
 next with no real change in air quality. Measured on a PA-II, a new PM

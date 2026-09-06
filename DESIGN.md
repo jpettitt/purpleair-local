@@ -185,8 +185,9 @@ Implementation:
   suffix. Averaged ids are unchanged — a regression test pins the full
   dual-laser id set, since changing one would orphan a user's history.
 
-**Measured behaviour** (PA-II, fw 7.02, polling `?live=true` every 2 s for
-3 min — 90/90 HTTP 200, median 73 ms):
+**Measured behaviour** (one PA-II, fw 7.02, polling `?live=true` every 2 s
+for 3 min — 90/90 HTTP 200, median 73 ms; see "The PA-II live block
+window" below for a second unit that behaves very differently):
 
 | field | value changes in 89 polls | median gap |
 | --- | --- | --- |
@@ -204,6 +205,63 @@ Live values are also quantized to whole µg/m³, so at ~2 µg/m³ the AQI
 oscillates between 4 and 13 on quantization alone. Automations should
 trigger on a sustained change (`for:`, or a filter/derivative helper),
 never a single reading.
+
+### The PA-II live block window
+
+Reported on [#7](https://github.com/jpettitt/purpleair-local/issues/7)
+after v0.2.0b1 shipped, and characterised from a one-hour debug log.
+
+**Some PA-II units block `?live=true` for roughly 30 s of every 120 s
+cycle, then release every pending request at a fixed point in that
+cycle.** On the reporting unit (hardware 2.0, firmware 7.02, installed
+2018) the release point sat at ~90.5 s into the cycle, and requests
+arriving anywhere from ~60 s to ~86.5 s all completed there:
+
+| arrived (cycle phase) | waited | completed (cycle phase) |
+| --- | --- | --- |
+| 86.5 s | 4.0 s | 90.5 s |
+| 81.5 s | 9.0 s | 90.5 s |
+| 71.4 s | 18.9 s | 90.3 s |
+| ~60 s | >10 s (timed out) | — |
+
+Across 33 clean stalls the completion phase only ever landed in
+[91, 92]. It is endpoint-specific: the same device's averaged `/json`
+never exceeded **76 ms** across 41 fetches in the same log. A PurpleAir
+Flex (hardware 3.0, firmware 7.04) on the same network showed nothing —
+294 live polls, max 321 ms. A second PA-II on the same firmware 7.02
+also showed no block window, so this is **not** universal to the model.
+
+Consequences the implementation has to live with:
+
+- **No poll interval avoids it.** A ~30 s window in a 120 s cycle is hit
+  by roughly a quarter of polls whatever the interval.
+- **No timeout covers it.** A request arriving at the window's start
+  waits ~30 s. Raising the timeout that far would block the coordinator
+  for a quarter of its duty cycle.
+- **Intervals that appear to "work" are phase locks, not fixes.** At 37 s
+  the reporter saw a stable 9 s stall because 3 × 37 = 111, and
+  120 − 111 = 9: once a stall completes at the release point, the third
+  following poll lands exactly 9 s before the next one, re-establishing
+  the lock. That 9 s sat 1 s under the 10 s request timeout — a
+  coincidence, not a safety margin.
+
+So the integration treats the window as something to *survive*:
+
+1. **Live requests are not retried** ([`api.py`](custom_components/purpleair_local/api.py)).
+   An immediate retry lands in the same block window, doubling a 10 s
+   stall to 20 s and putting a second request on a sensor that is
+   already refusing to answer. The averaged endpoint keeps its retry.
+2. **The live coordinator rides out consecutive transient failures**,
+   serving the previous reading rather than dropping entities to
+   `unavailable`. The allowance is derived from the poll interval so the
+   grace period always exceeds `LIVE_FAILURE_GRACE_S` (60 s) — long
+   enough to outlast a block window plus jitter, short enough to surface
+   a genuinely dead sensor. Invalid responses are *not* ridden out;
+   those are persistent, not transient.
+
+Neither is a workaround for a bug on our side — the delay is firmware
+behaviour on the device. What we control is not amplifying it and not
+reporting it to the user as an outage.
 
 ### Config flow
 

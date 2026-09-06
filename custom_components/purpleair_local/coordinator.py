@@ -32,8 +32,13 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .api import PurpleAirClient, PurpleAirError
-from .const import DEFAULT_SCAN_INTERVAL_S, DOMAIN
+from .api import (
+    PurpleAirClient,
+    PurpleAirConnectionError,
+    PurpleAirError,
+    PurpleAirTimeoutError,
+)
+from .const import DEFAULT_SCAN_INTERVAL_S, DOMAIN, LIVE_FAILURE_GRACE_S
 from .models import SensorReading
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,6 +68,15 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
         )
         self.client = client
         self.live = live
+        # How many consecutive transient failures the live coordinator
+        # rides out before giving up and marking the update failed. Sized
+        # so the grace period always exceeds LIVE_FAILURE_GRACE_S: at a
+        # 15 s interval that's 5 polls (75 s), at 37 s it's 2 (74 s).
+        # Zero for the averaged coordinator — it fails fast.
+        self.max_consecutive_failures = (
+            (LIVE_FAILURE_GRACE_S // scan_interval_s) + 1 if live else 0
+        )
+        self._consecutive_failures = 0
         # Kept around between polls so the diagnostics download can
         # include the exact bytes the sensor returned, not just the
         # parsed dataclass — useful when a bug report concerns a
@@ -73,10 +87,34 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
     async def _async_update_data(self) -> SensorReading:
         try:
             payload = await self.client.get_reading(live=self.live)
+        except (PurpleAirConnectionError, PurpleAirTimeoutError) as err:
+            # Transient by nature, and on the live endpoint frequently
+            # just the sensor's periodic block window rather than a
+            # fault. Serve the previous reading until the grace period
+            # is exhausted so entities don't flap to `unavailable`
+            # mid-automation. Requires a previous reading to serve;
+            # without one there is nothing to fall back to.
+            self._consecutive_failures += 1
+            if (
+                self._consecutive_failures <= self.max_consecutive_failures
+                and self.data is not None
+            ):
+                _LOGGER.debug(
+                    "purpleair %s: transient failure %d of %d, serving the "
+                    "previous reading: %s",
+                    self.name,
+                    self._consecutive_failures,
+                    self.max_consecutive_failures,
+                    err,
+                )
+                return self.data
+            raise UpdateFailed(
+                f"could not fetch reading from {self.client.host}: {err}"
+            ) from err
         except PurpleAirError as err:
-            # PurpleAirError is the union of connection / timeout /
-            # invalid-response; the specific type is already in `err`'s
-            # message, no need to re-classify here.
+            # Invalid response — a persistent state (wrong host, sensor
+            # in a weird mode), so no point riding it out.
+            self._consecutive_failures += 1
             raise UpdateFailed(
                 f"could not fetch reading from {self.client.host}: {err}"
             ) from err
@@ -89,6 +127,7 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
             raise UpdateFailed(
                 f"malformed payload from {self.client.host}: {err}"
             ) from err
+        self._consecutive_failures = 0
         self.last_raw_payload = payload
         return reading
 
