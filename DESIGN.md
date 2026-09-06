@@ -212,9 +212,9 @@ Reported on [#7](https://github.com/jpettitt/purpleair-local/issues/7)
 after v0.2.0b1 shipped, and characterised from a one-hour debug log.
 
 **Root cause: `?live=true` blocks behind the sensor's once-per-120 s
-cloud upload.** Every PA-II uploads to PurpleAir (and to a Data
-Processor, if configured) on its `period` boundary. That upload is
-blocking, and the live endpoint waits for it. The averaged `/json` does
+outbound HTTPS.** On its `period` boundary every PA-II connects out to
+PurpleAir, and some units make a second connection elsewhere. Those are
+blocking, and the live endpoint waits for them. The averaged `/json` does
 not, because it serves the buffer the firmware has just computed rather
 than reading the sensor hardware — which is why the two endpoints
 behave so differently on the same device at the same moment.
@@ -248,22 +248,31 @@ dropping packets rather than rejecting them — immediately produced
 repeated **15 s** stalls, while `httpsuccess` froze and `httpsends` kept
 climbing. The router log showed the cause: 7 TCP SYN retransmits at 3 s
 intervals, ~18 s per upload target, starting every 120 s. Restoring
-access returned the same sensor to 64 ms. A second unit here has a dead
-Data Processor endpoint and reports `response: -11`
-(`HTTPC_ERROR_READ_TIMEOUT`) with a steady **2.03 sends and 1.03
-successes per cycle** across 1787 cycles — it stalls permanently,
-without any firewall involvement.
+access returned the same sensor to 64 ms.
 
-Two upload targets means two stalls per cycle: the unit with a Data
-Processor configured stalled roughly twice as often as the one without.
+A second unit here reproduces it permanently with no firewall involved.
+It makes a second HTTPS connection each cycle to a non-PurpleAir,
+Google-hosted address that accepts the connection and never replies,
+reporting `response: -11` (`HTTPC_ERROR_READ_TIMEOUT`) at a steady
+**~2.1 sends against ~1.1 successes per cycle**. Live stalls up to
+**36.6 s**, once per cycle. It survives a reboot — after a restart the
+sensor is briefly clean, then `-11` returns as soon as the second target
+is first attempted (~160 s in) and the stalls resume.
+
+What configures that second target is **unknown**: the sensor's local
+`/config` page is only a WiFi setup form, with no field for it. Do not
+assume a user can point at a setting and remove it.
+
+Two connections per cycle means two chances to stall, and the unit
+making them stalls roughly twice as often as the one that doesn't.
 
 **Diagnosing it on any sensor:** compare `httpsends` against
 `httpsuccess` in the payload. If sends outrun successes, that sensor has
-a failing upload and will stall its live endpoint by however long the
-failure takes. `response` carries the ESP8266 HTTP client error code for
-the Data Processor target, and `pa_latency` / `latency` the per-target
-upload times. Fixing the upload removes the stall at source; everything
-below only stops us making it worse.
+a failing outbound connection and will stall its live endpoint by however
+long the failure takes. `response` carries the ESP8266 HTTP client error
+code for the second target when one exists, and `pa_latency` / `latency`
+the per-target times. Where the failure can be fixed, that removes the
+stall at source; everything below only stops us making it worse.
 
 Consequences the implementation has to live with:
 
@@ -419,9 +428,11 @@ three distinct cases of "missing":
 - **Missing hardware** — single-laser unit has no `pm*_b`, no `p_*_um_b`,
   no `pm2.5_aqi_b`. A unit without a BME has no environment fields. A
   unit with only a BME280 has no `*_680` fields and no `gas_680`.
-- **Conditional fields** — `response`, `response_date` only present when
-  the user configured a Data Processor. Some `status_*` indices appear
-  only when their subsystem ran.
+- **Conditional fields** — `response`, `response_date` and `latency`
+  appear only on units that make a second outbound connection beyond the
+  PurpleAir upload; what configures that is unknown (see "The PA-II live
+  block window"). Some `status_*` indices appear only when their
+  subsystem ran.
 - **Firmware variation** — 7.02 uses `pm2.5_aqi` (dot); a future firmware
   may switch to `pm2_5_aqi` (underscore). Parser accepts either.
 

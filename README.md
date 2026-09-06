@@ -78,13 +78,13 @@ the temperature/humidity/pressure or diagnostic entities — the sensor
 returns identical values for those on both endpoints.
 
 **A failing cloud upload will stall the live endpoint.** Once every 120
-seconds a PA-II uploads to the PurpleAir cloud, and to a Data Processor
-if you've configured one. That upload blocks, and `?live=true` waits
-behind it — the averaged entities are unaffected. When uploads succeed
-this costs a few hundred milliseconds and you'll never notice. When one
-*hangs* — packets dropped by a firewall, a dead Data Processor URL, DNS
-trouble — live requests hang with it, typically 15–30 seconds, once per
-cycle.
+seconds a PA-II connects out to the PurpleAir cloud; some units make a
+second connection elsewhere too. Those connections block, and
+`?live=true` waits behind them — the averaged entities are unaffected.
+When they succeed this costs a few hundred milliseconds and you'll never
+notice. When one *hangs* — packets dropped by a firewall, DNS trouble,
+an endpoint that accepts the connection and never replies — live
+requests hang with it, typically 15–35 seconds, once per cycle.
 
 The integration absorbs this: live requests aren't retried (the retry
 would land in the same stall), and short runs of failures keep serving
@@ -97,11 +97,16 @@ But if you're seeing gaps, it's worth fixing at the source. Open
 - `httpsuccess` — successful uploads
 
 If `httpsends` is climbing faster than `httpsuccess`, that sensor has a
-failing upload, and that's your stall. A sensor with a Data Processor
-configured also reports `response` (the HTTP client error code, e.g.
-`-11` for a read timeout) and `latency` for that target. Clearing the
-bad target — or removing the Data Processor URL if you no longer use it —
-removes the stall entirely.
+failing outbound connection, and that's your stall. Units making a second
+connection also report `response` — the ESP8266 HTTP client error code
+for it, e.g. `-11` for a read timeout — plus a `latency` for that target.
+
+If the failure is something you control (a firewall rule, DNS), fixing it
+removes the stall entirely. Be aware that it may not be: one sensor here
+retries a non-PurpleAir endpoint every cycle with no corresponding
+setting anywhere in its local config page, and a reboot doesn't clear it.
+That's why the integration absorbs the stall rather than assuming you can
+eliminate it.
 
 **Live readings are noisy.** The firmware reports whole µg/m³, so at low
 concentrations the AQI can swing between 4 and 13 from one reading to the

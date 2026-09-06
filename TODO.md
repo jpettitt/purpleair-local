@@ -117,13 +117,21 @@ landable on its own.
   smoke test (no unique_id churn, no runaway polling, live coordinator
   recovering cleanly after the sensor drops a request).
 - Confirm the block-window handling against the **indoor sensor**, which
-  reproduces it permanently: its Data Processor target is dead, so it
-  reports `response: -11` (read timeout) and runs 2.03 sends / 1.03
-  successes per cycle, stalling `?live=true` every cycle. That makes it
-  a standing regression rig for this — no firewall games needed. (The
-  outdoor sensor has healthy uploads and does not stall; blocking its
-  internet access reproduces the fault on demand if a second unit is
-  ever wanted.)
+  reproduces it permanently: a second HTTPS connection each cycle to a
+  non-PurpleAir endpoint read-times-out (`response: -11`), giving ~2.1
+  sends against ~1.1 successes per cycle and live stalls up to 36.6 s.
+  Survives a reboot (clean for ~160 s after restart, then it returns).
+  That makes it a standing regression rig — no firewall games needed.
+  (The outdoor sensor has healthy uploads and does not stall; blocking
+  its internet access reproduces the fault on demand.)
+- **Open question: what is the indoor sensor's second upload target?**
+  It resolves to a Google-hosted address (`1e100.net`) while PurpleAir's
+  own API is on AWS, and the sensor's local `/config` page is only a
+  WiFi setup form with no field for it. An earlier memory note called it
+  a "Data Processor", but that was never verified and the maintainer
+  doesn't recognise the term. The router's DNS log would name the
+  hostname the sensor resolves each cycle and settle it. Until then,
+  don't tell users to go remove a setting that may not exist.
 - Consider surfacing upload health as a diagnostic entity — an
   `uploads_failing` binary sensor, or exposing the `httpsends` minus
   `httpsuccess` delta. It's the single field that explains live stalls,
