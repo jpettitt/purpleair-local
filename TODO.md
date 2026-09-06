@@ -109,19 +109,32 @@ landable on its own.
 
 ## Before releasing v0.2.0 final
 
-- Remove the beta callout from the "Live entities (optional)" section
-  of [README.md](README.md) once v0.2.0 ships as a normal release —
-  it points users at HACS _Show beta versions_, which is wrong the
-  moment the stable tag exists.
+- ~~Remove the beta callout from the "Live entities (optional)" section
+  of [README.md](README.md).~~ _Done — removed ahead of the v0.2.0
+  stable tag._
 - Confirm live entities behaved over a longer run than the testbed
   smoke test (no unique_id churn, no runaway polling, live coordinator
   recovering cleanly after the sensor drops a request).
-- Confirm the PA-II block-window handling on a unit that actually
-  reproduces it. Neither of the maintainer's sensors does — the
-  characterisation came from a reporter's log on #7, so the no-retry
-  and failure-tolerance changes are verified by unit tests and their
-  log, not by local reproduction. Ask the reporter for a fresh debug
-  log on the beta before calling it confirmed.
+- Confirm the block-window handling on a stalling sensor. **Neither unit
+  stalls any more** — the indoor one's cause was a dead Weather
+  Underground Data Processor, removed 2026-09-06, which took it from
+  9 stalls in 48 polls (worst 36.6 s) to 1 in 60 (worst 1.90 s). To
+  reproduce on demand, either re-add a Data Processor pointing at a
+  black-holed address, or firewall a sensor's outbound HTTPS with a
+  DROP rule (not REJECT — it has to hang, not fail fast).
+- **Answered: the second target is a PurpleAir "Data Processor".** It is
+  configured **server-side in the owner's PurpleAir account**, not on the
+  device — which is why the sensor's local `/config` page (a WiFi setup
+  form) has no field for it, and why grepping the device for a setting
+  found nothing. The indoor unit's was a stale Weather Underground link,
+  removed 2026-09-06. This is the actionable fix to offer users whose
+  live endpoint stalls: check the Data Processor settings on the
+  PurpleAir site for a dead third-party target.
+- Consider surfacing upload health as a diagnostic entity — an
+  `uploads_failing` binary sensor, or exposing the `httpsends` minus
+  `httpsuccess` delta. It's the single field that explains live stalls,
+  and users currently have to read raw JSON to find it. Would have
+  turned #7 into a self-diagnosis.
 - Write the v0.2.0 release notes as **one story spanning b1 and b2**,
   not as a diff against b2. Stable users are coming from v0.1.1 and
   never saw either pre-release, so the notes need the live-entities

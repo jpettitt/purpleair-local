@@ -21,17 +21,33 @@ they're commonly transient on a residential LAN; an invalid response is
 not retried because it almost always reflects a persistent state (wrong
 host, wrong port, sensor in a weird mode).
 
-Live requests are the exception: they are not retried. Some PA-II units
-(hardware 2.0, firmware 7.02) block `?live=true` for roughly 30 s of
-every 120 s cycle and release all pending requests at a fixed point in
-that cycle. Measured on a reporter's 2018 unit: requests arriving
-anywhere from ~60 s to ~86 s into the cycle all completed at ~90.5 s,
-waiting between 30 s and 4 s accordingly, while the same device's
-averaged `/json` never exceeded 76 ms. A retry issued the instant the
-first attempt times out lands in the same block window, so it doubles
-the stall and adds load for no chance of success. Not every PA-II shows
-this — a second unit on the same firmware did not — so it is treated as
-something to survive, not something to detect.
+Live requests are the exception: they are not retried. Once per 120 s
+cycle a PA-II makes outbound HTTPS connections — always to PurpleAir,
+plus one per "Data Processor" the owner has configured in their
+PurpleAir account (a third-party forwarding target such as Weather
+Underground; it is set on PurpleAir's website, not on the device).
+Those connections are blocking, so `?live=true` is stuck behind them
+for however long they take, while the averaged `/json` is unaffected
+because it serves the buffer the firmware just computed rather than
+touching the sensor hardware.
+
+When uploads succeed the stall is a few hundred ms and invisible. When
+one hangs, the live endpoint hangs with it:
+
+  - Uploads dropped at the firewall: ~18 s per target (7 TCP SYN
+    retransmits) — measured by blocking a healthy sensor's internet
+    access, which took it from one 2.6 s stall in 90 polls to repeated
+    15 s stalls.
+  - Connection accepted but never answered: an ESP8266 `HTTPC_ERROR_
+    READ_TIMEOUT` (`response: -11` in the payload). A unit here hit this
+    every cycle against a dead Weather Underground forwarding target,
+    stalling live for 30+ s until the owner removed it. Note that
+    setting lives on the PurpleAir website, not the device.
+
+So a retry issued the moment the first attempt times out lands inside
+the same upload, doubling the stall and adding load for no chance of
+success. `httpsends` outrunning `httpsuccess` in the payload is the
+tell that a sensor is affected.
 """
 
 from __future__ import annotations
@@ -113,13 +129,14 @@ class PurpleAirClient:
             PurpleAirInvalidResponseError: HTTP status was >=400 or body
                 wasn't valid JSON. Never retried.
         """
-        # Live requests get one attempt, not two. Some PA-II units block
-        # ?live=true for ~30 s of every 120 s cycle (see the module
-        # docstring), which is far wider than the request timeout — so an
-        # immediate retry lands inside the same block and times out too.
-        # That turns a 10 s stall into a 20 s one and puts a second
-        # request on a sensor that is already refusing to answer. The
-        # averaged endpoint shows no such window, so it keeps the retry.
+        # Live requests get one attempt, not two. ?live=true blocks
+        # behind the sensor's once-per-120 s cloud upload (see the module
+        # docstring), and a hung upload lasts far longer than the request
+        # timeout — so an immediate retry lands inside the same upload
+        # and times out too. That turns a 10 s stall into a 20 s one and
+        # puts a second request on a sensor already unable to answer. The
+        # averaged endpoint doesn't block on the upload, so it keeps the
+        # retry.
         attempts = (1,) if live else (1, 2)
         last_transient: PurpleAirError | None = None
         for attempt in attempts:

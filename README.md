@@ -57,11 +57,6 @@ entities and the disagreement binary sensor automatically.
 
 ## Live entities (optional)
 
-> **Ships in v0.2.0 — currently in beta.** To try it, turn on
-> *Show beta versions* in HACS (⋮ on the PurpleAir Local entry →
-> Redownload → toggle it), pick a `0.2.0bN` release, and restart Home
-> Assistant.
-
 By default the integration reads the sensor's averaged endpoint, which
 updates every two minutes. If you're driving an automation that needs to
 react to a smoke plume quickly — shutting down mechanical ventilation,
@@ -77,17 +72,45 @@ Live entities are primary-channel only, and there are no live twins of
 the temperature/humidity/pressure or diagnostic entities — the sensor
 returns identical values for those on both endpoints.
 
-**Some PA-II units stall the live endpoint.** On certain PA-IIs (hardware
-2.0) the firmware stops answering `?live=true` for roughly 30 seconds out
-of every 120, then answers everything at once — so around a quarter of
-live polls come back slowly, and some time out. Not all units do it, no
-poll interval avoids it, and it doesn't affect the averaged entities at
-all. The integration absorbs it: live requests aren't retried (a retry
-lands in the same stall), and short runs of failures keep serving the last
-reading instead of dropping your entities to `unavailable`. If you see
-occasional gaps in the live history but the averaged entities are fine,
-this is what you're looking at — it's the sensor's firmware, not the
-integration.
+**A failing cloud upload will stall the live endpoint.** Once every 120
+seconds a PA-II connects out to the PurpleAir cloud; some units make a
+second connection elsewhere too. Those connections block, and
+`?live=true` waits behind them — the averaged entities are unaffected.
+When they succeed this costs a few hundred milliseconds and you'll never
+notice. When one *hangs* — packets dropped by a firewall, DNS trouble,
+an endpoint that accepts the connection and never replies — live
+requests hang with it, typically 15–35 seconds, once per cycle.
+
+The integration absorbs this: live requests aren't retried (the retry
+would land in the same stall), and short runs of failures keep serving
+the last reading rather than dropping your entities to `unavailable`.
+
+But if you're seeing gaps, it's worth fixing at the source. Open
+`http://<sensor-ip>/json` and compare two fields:
+
+- `httpsends` — upload attempts
+- `httpsuccess` — successful uploads
+
+If `httpsends` is climbing faster than `httpsuccess`, that sensor has a
+failing outbound connection, and that's your stall.
+
+**The most common cause is a stale Data Processor.** PurpleAir lets you
+forward readings to a third party (Weather Underground and similar), and
+that's configured **in your PurpleAir account on their website, not on
+the sensor** — so there's nothing about it on the device's own config
+page. If that target has gone away, the sensor still tries it every
+cycle and waits for the timeout, stalling live requests the whole time.
+A sensor here was doing exactly this against a long-dead Weather
+Underground link, stalling live for up to 36 seconds every cycle.
+
+Sensors with a Data Processor set also report `response` — the HTTP
+client error code for that target, e.g. `-11` for a read timeout — plus
+a `latency` for it. If you see that, check your Data Processor settings
+on the PurpleAir site and remove anything you no longer use.
+
+Other causes are a firewall blocking the sensor's outbound HTTPS, or DNS
+trouble. Fixing the failing target removes the stall at source; the
+integration's handling just stops it becoming an outage in the meantime.
 
 **Live readings are noisy.** The firmware reports whole µg/m³, so at low
 concentrations the AQI can swing between 4 and 13 from one reading to the

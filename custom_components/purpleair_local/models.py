@@ -9,8 +9,8 @@ The parser tolerates the firmware-vs-docs quirks observed on PA-II 7.02
   - `place` is `inside`/`outside` in firmware, `indoor`/`outdoor` in docs.
     Both normalize to the same `Place` enum.
   - Many optional subsystems may be absent entirely (single-laser unit,
-    no BME, no Data Processor configured). The parser populates None /
-    skips channels rather than guessing.
+    no BME, no Data Processor target). The parser populates None / skips
+    channels rather than guessing.
 
 Channel-B detection is by *field presence*, not by parsing the
 `hardwarediscovered` string. If `pm2_5_atm_b` is in the payload we build
