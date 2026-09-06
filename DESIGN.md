@@ -250,18 +250,32 @@ climbing. The router log showed the cause: 7 TCP SYN retransmits at 3 s
 intervals, ~18 s per upload target, starting every 120 s. Restoring
 access returned the same sensor to 64 ms.
 
-A second unit here reproduces it permanently with no firewall involved.
-It makes a second HTTPS connection each cycle to a non-PurpleAir,
-Google-hosted address that accepts the connection and never replies,
-reporting `response: -11` (`HTTPC_ERROR_READ_TIMEOUT`) at a steady
-**~2.1 sends against ~1.1 successes per cycle**. Live stalls up to
-**36.6 s**, once per cycle. It survives a reboot — after a restart the
-sensor is briefly clean, then `-11` returns as soon as the second target
-is first attempted (~160 s in) and the stalls resume.
+A second unit here reproduced it permanently with no firewall involved,
+and its cause is the one worth telling users about: a **stale Data
+Processor**. PurpleAir lets an owner forward readings to a third party,
+configured **server-side in the PurpleAir account, not on the device** —
+which is why the sensor's local `/config` page (a WiFi setup form) has
+no field for it. This unit's target was a long-dead Weather Underground
+link. Every cycle the sensor connected, waited, and gave up with
+`response: -11` (`HTTPC_ERROR_READ_TIMEOUT`), running **~2.1 sends
+against ~1.1 successes per cycle** and stalling live up to **36.6 s**.
+It survived a reboot: clean for ~160 s after restart, then the target
+was attempted again and the stalls resumed.
 
-What configures that second target is **unknown**: the sensor's local
-`/config` page is only a WiFi setup form, with no field for it. Do not
-assume a user can point at a setting and remove it.
+**Removing it fixed the stall outright**, closing the causal loop:
+
+| indoor unit | sends/cycle | successes/cycle | stalls | worst |
+| --- | --- | --- | --- | --- |
+| dead Data Processor | 2.03 | 1.03 | 9 / 48 polls | 36.6 s |
+| after removal | 1.55 | 1.55 | 1 / 60 polls | 1.90 s |
+
+`response_date` stopped advancing entirely, confirming the sensor no
+longer attempts the target.
+
+So `httpsends` outrunning `httpsuccess` on a sensor with a `response`
+field usually means a dead forwarding target the owner has forgotten
+about, and removing it on the PurpleAir site fixes the stall at source.
+That is worth checking before blaming the integration or the network.
 
 Two connections per cycle means two chances to stall, and the unit
 making them stalls roughly twice as often as the one that doesn't.
@@ -429,10 +443,9 @@ three distinct cases of "missing":
   no `pm2.5_aqi_b`. A unit without a BME has no environment fields. A
   unit with only a BME280 has no `*_680` fields and no `gas_680`.
 - **Conditional fields** — `response`, `response_date` and `latency`
-  appear only on units that make a second outbound connection beyond the
-  PurpleAir upload; what configures that is unknown (see "The PA-II live
-  block window"). Some `status_*` indices appear only when their
-  subsystem ran.
+  appear only when the owner has a Data Processor configured in their
+  PurpleAir account (see "The PA-II live block window"). Some `status_*`
+  indices appear only when their subsystem ran.
 - **Firmware variation** — 7.02 uses `pm2.5_aqi` (dot); a future firmware
   may switch to `pm2_5_aqi` (underscore). Parser accepts either.
 

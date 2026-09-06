@@ -97,16 +97,25 @@ But if you're seeing gaps, it's worth fixing at the source. Open
 - `httpsuccess` — successful uploads
 
 If `httpsends` is climbing faster than `httpsuccess`, that sensor has a
-failing outbound connection, and that's your stall. Units making a second
-connection also report `response` — the ESP8266 HTTP client error code
-for it, e.g. `-11` for a read timeout — plus a `latency` for that target.
+failing outbound connection, and that's your stall.
 
-If the failure is something you control (a firewall rule, DNS), fixing it
-removes the stall entirely. Be aware that it may not be: one sensor here
-retries a non-PurpleAir endpoint every cycle with no corresponding
-setting anywhere in its local config page, and a reboot doesn't clear it.
-That's why the integration absorbs the stall rather than assuming you can
-eliminate it.
+**The most common cause is a stale Data Processor.** PurpleAir lets you
+forward readings to a third party (Weather Underground and similar), and
+that's configured **in your PurpleAir account on their website, not on
+the sensor** — so there's nothing about it on the device's own config
+page. If that target has gone away, the sensor still tries it every
+cycle and waits for the timeout, stalling live requests the whole time.
+A sensor here was doing exactly this against a long-dead Weather
+Underground link, stalling live for up to 36 seconds every cycle.
+
+Sensors with a Data Processor set also report `response` — the HTTP
+client error code for that target, e.g. `-11` for a read timeout — plus
+a `latency` for it. If you see that, check your Data Processor settings
+on the PurpleAir site and remove anything you no longer use.
+
+Other causes are a firewall blocking the sensor's outbound HTTPS, or DNS
+trouble. Fixing the failing target removes the stall at source; the
+integration's handling just stops it becoming an outage in the meantime.
 
 **Live readings are noisy.** The firmware reports whole µg/m³, so at low
 concentrations the AQI can swing between 4 and 13 from one reading to the

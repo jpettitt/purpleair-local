@@ -23,10 +23,13 @@ host, wrong port, sensor in a weird mode).
 
 Live requests are the exception: they are not retried. Once per 120 s
 cycle a PA-II makes outbound HTTPS connections — always to PurpleAir,
-and on some units a second one elsewhere. Those are blocking, and
-`?live=true` is stuck behind them for however long they take, while the
-averaged `/json` is unaffected because it serves the buffer the firmware
-just computed rather than touching the sensor hardware.
+plus one per "Data Processor" the owner has configured in their
+PurpleAir account (a third-party forwarding target such as Weather
+Underground; it is set on PurpleAir's website, not on the device).
+Those connections are blocking, so `?live=true` is stuck behind them
+for however long they take, while the averaged `/json` is unaffected
+because it serves the buffer the firmware just computed rather than
+touching the sensor hardware.
 
 When uploads succeed the stall is a few hundred ms and invisible. When
 one hangs, the live endpoint hangs with it:
@@ -36,10 +39,10 @@ one hangs, the live endpoint hangs with it:
     access, which took it from one 2.6 s stall in 90 polls to repeated
     15 s stalls.
   - Connection accepted but never answered: an ESP8266 `HTTPC_ERROR_
-    READ_TIMEOUT` (`response: -11` in the payload). One unit here hits
-    this every cycle on a second, non-PurpleAir target, stalling live
-    for 30+ s. It survives a reboot and there is no setting for it on
-    the sensor's local config page.
+    READ_TIMEOUT` (`response: -11` in the payload). A unit here hit this
+    every cycle against a dead Weather Underground forwarding target,
+    stalling live for 30+ s until the owner removed it. Note that
+    setting lives on the PurpleAir website, not the device.
 
 So a retry issued the moment the first attempt times out lands inside
 the same upload, doubling the stall and adding load for no chance of
