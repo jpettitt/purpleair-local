@@ -57,11 +57,6 @@ entities and the disagreement binary sensor automatically.
 
 ## Live entities (optional)
 
-> **Ships in v0.2.0 — currently in beta.** To try it, turn on
-> *Show beta versions* in HACS (⋮ on the PurpleAir Local entry →
-> Redownload → toggle it), pick a `0.2.0bN` release, and restart Home
-> Assistant.
-
 By default the integration reads the sensor's averaged endpoint, which
 updates every two minutes. If you're driving an automation that needs to
 react to a smoke plume quickly — shutting down mechanical ventilation,

@@ -109,10 +109,9 @@ landable on its own.
 
 ## Before releasing v0.2.0 final
 
-- Remove the beta callout from the "Live entities (optional)" section
-  of [README.md](README.md) once v0.2.0 ships as a normal release —
-  it points users at HACS _Show beta versions_, which is wrong the
-  moment the stable tag exists.
+- ~~Remove the beta callout from the "Live entities (optional)" section
+  of [README.md](README.md).~~ _Done — removed ahead of the v0.2.0
+  stable tag._
 - Confirm live entities behaved over a longer run than the testbed
   smoke test (no unique_id churn, no runaway polling, live coordinator
   recovering cleanly after the sensor drops a request).
