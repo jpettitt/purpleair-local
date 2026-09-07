@@ -20,6 +20,7 @@ from custom_components.purpleair_local.aqi import (
     aqi_lrapa,
     aqi_raw,
     correct_epa,
+    correct_epa_extended,
     pm25_to_aqi,
 )
 from custom_components.purpleair_local.aqi import (
@@ -29,6 +30,7 @@ from custom_components.purpleair_local.aqi import (
 from custom_components.purpleair_local.const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
+    AQI_CORRECTION_EPA_EXTENDED,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
     CONF_AQI_COLOR_SCHEME,
@@ -664,3 +666,83 @@ def test_live_aqi_follows_the_selected_corrections(indoor_payload):
     aqi_ids = {i for i in (e.unique_id for e in live) if "_aqi_" in i}
 
     assert aqi_ids == {f"{sid}_primary_aqi_lrapa_live"}
+
+
+# --- extended EPA correction (issue #15) ----------------------------------
+
+
+def test_epa_extended_creates_its_own_entity():
+    """It's an additional correction, not a replacement for `epa`.
+
+    Both must be able to coexist: a user adding the extended form
+    keeps their existing `_aqi_epa` entity and its history.
+    """
+    payload = _dual_payload(pm25_a=10.0, pm25_b=20.0, rh=50.0)
+    entities = build_entities(
+        _coordinator(payload),
+        options={
+            CONF_AQI_CORRECTIONS: [
+                AQI_CORRECTION_EPA,
+                AQI_CORRECTION_EPA_EXTENDED,
+            ]
+        },
+    )
+    sid = payload["SensorId"]
+    ids = {e.unique_id for e in entities}
+
+    assert f"{sid}_primary_aqi_epa" in ids
+    assert f"{sid}_primary_aqi_epa_extended" in ids
+
+
+def test_epa_extended_entity_uses_the_piecewise_formula():
+    """Value must come from correct_epa_extended on the cf_1 average."""
+    payload = _dual_payload(pm25_a=200.0, pm25_b=300.0, rh=50.0)
+    # cf1 = atm * 1.5 in the synthetic payload: A 300, B 450, primary 375.
+    by_id = _by_unique_id(
+        build_entities(
+            _coordinator(payload),
+            options={CONF_AQI_CORRECTIONS: [AQI_CORRECTION_EPA_EXTENDED]},
+        )
+    )
+    sid = payload["SensorId"]
+    expected = pm25_to_aqi(correct_epa_extended(375.0, 50.0))
+
+    assert by_id[f"{sid}_primary_aqi_epa_extended"].native_value == expected
+
+
+def test_epa_extended_diverges_from_epa_in_heavy_smoke():
+    """At smoke concentrations the two corrections must not agree.
+
+    Guards against the extended entity being wired to the linear
+    formula by mistake — which would look completely fine in clean air.
+    """
+    payload = _dual_payload(pm25_a=300.0, pm25_b=300.0, rh=50.0)
+    by_id = _by_unique_id(
+        build_entities(
+            _coordinator(payload),
+            options={
+                CONF_AQI_CORRECTIONS: [
+                    AQI_CORRECTION_EPA,
+                    AQI_CORRECTION_EPA_EXTENDED,
+                ]
+            },
+        )
+    )
+    sid = payload["SensorId"]
+    simple = by_id[f"{sid}_primary_aqi_epa"].native_value
+    extended = by_id[f"{sid}_primary_aqi_epa_extended"].native_value
+
+    assert extended > simple
+
+
+def test_epa_extended_without_humidity_is_none():
+    """Like `epa`, it needs RH; no BME means no input to correct."""
+    payload = _dual_payload(pm25_a=10.0, pm25_b=20.0, include_bme=False)
+    by_id = _by_unique_id(
+        build_entities(
+            _coordinator(payload),
+            options={CONF_AQI_CORRECTIONS: [AQI_CORRECTION_EPA_EXTENDED]},
+        )
+    )
+    sid = payload["SensorId"]
+    assert by_id[f"{sid}_primary_aqi_epa_extended"].native_value is None

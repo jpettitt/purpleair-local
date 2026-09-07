@@ -33,8 +33,9 @@ Per configured sensor:
   units. Primary on dual is the simple A/B average for v0.1.
 - **PM2.5 AQI** — one entity per enabled correction, using the
   2024-revised US EPA breakpoint table. Default: raw (no concentration
-  correction) and EPA (Barkjohn 2021). AQandU and LRAPA available via
-  the options flow.
+  correction) and EPA (Barkjohn 2021). Also available via the options
+  flow: EPA extended (the five-piece version, which stays accurate in
+  heavy smoke where the linear form under-reports), AQandU, and LRAPA.
 - **Temperature, humidity, dewpoint, pressure** — only when the sensor
   has a BME280 or BME680. BME680 values preferred when both are present.
   Note: the temperature reading runs a few degrees high. The BME sits

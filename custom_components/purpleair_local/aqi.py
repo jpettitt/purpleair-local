@@ -1,21 +1,26 @@
 """PurpleAir mass-to-AQI conversions, with three published corrections.
 
-Three corrections are implemented as pure functions. Each takes one
-PM2.5 reading (and humidity, for the EPA one) and returns a corrected
-mass concentration in µg/m³. A fourth function maps that corrected
+Four corrections are implemented as pure functions. Each takes one
+PM2.5 reading (and humidity, for the EPA ones) and returns a corrected
+mass concentration in µg/m³. A further function maps that corrected
 mass to the US EPA Air Quality Index using the 2024-revised PM2.5
 breakpoint table.
 
-Why three corrections (and one "raw")
--------------------------------------
+Why four corrections (and one "raw")
+------------------------------------
 The Plantower PMS5003 inside a PurpleAir reads high in most ambient
 conditions. Different agencies have published empirical corrections to
 align it with regulatory monitors:
 
   - **EPA (Barkjohn 2021)** — the US-wide correction now used on the
-    AirNow Fire and Smoke Map. Accurate to ~250 µg/m³; a piecewise
-    extension exists for higher concentrations during heavy smoke and
-    can be added later as a separate option.
+    AirNow Fire and Smoke Map. A single linear fit, accurate to
+    ~250 µg/m³.
+  - **EPA extended** — the five-piece version of the same work, which
+    keeps its accuracy into heavy-smoke concentrations where the linear
+    form under-reports badly (at 400 µg/m³ it returns roughly double).
+    Identical to the linear form below 30 µg/m³. Offered alongside
+    `EPA` rather than replacing it, so nobody's history changes shape
+    under them.
   - **AQandU** — University of Utah's correction, popular among home
     users in the western US.
   - **LRAPA** — Lane Regional Air Protection Agency (Oregon). Tuned
@@ -225,12 +230,86 @@ def correct_epa(pm_cf1: float, rh_pct: float) -> float:
     """Barkjohn 2021 EPA correction.
 
     Validated to ~250 µg/m³ PM2.5; above that it underestimates and
-    callers may prefer the (not-yet-implemented) piecewise extension.
+    callers may prefer `correct_epa_extended`.
     Negative outputs (which occur at very low PM and high humidity) are
     clamped to 0.
     """
     corrected = 0.524 * pm_cf1 - 0.0862 * rh_pct + 5.75
     return corrected if corrected > 0.0 else 0.0
+
+
+def correct_epa_extended(pm_cf1: float, rh_pct: float) -> float:
+    """Piecewise EPA correction, valid into heavy-smoke concentrations.
+
+    The AirNow Fire and Smoke Map's five-piece extension of Barkjohn
+    2021. Below 30 µg/m³ it is identical to `correct_epa`; above ~210 it
+    switches to a quadratic fit that stops the simple linear form
+    under-reporting during wildfire smoke.
+
+    The five pieces are two plain linear segments, a quadratic tail, and
+    two blend bands that interpolate between them. Rather than
+    transcribing the published algebra literally, the blends are written
+    as an explicit weight `w` running 0 → 1 across the band, so a reader
+    can see that they are a linear crossfade between the neighbouring
+    pieces. The result is identical and far easier to check.
+
+    Continuity at all four boundaries (30, 50, 210, 260) is a property
+    of the published formula and is pinned by unit tests — a piecewise
+    implementation that drifts at a boundary would put a step change
+    into users' history.
+
+    Takes `pm_cf1`, not the ATM density: like every correction here it
+    was fit against the CF=1 estimate. Those two are equal at low
+    concentrations on a PA-II and diverge exactly where this formula
+    matters, so feeding ATM would be wrong in a way that is invisible in
+    clean air.
+
+    Negative outputs are clamped to 0, matching `correct_epa`.
+    """
+    if pm_cf1 < 30.0:
+        corrected = _epa_low(pm_cf1, rh_pct)
+    elif pm_cf1 < 50.0:
+        # Blend the two linear slopes across 30 → 50.
+        w = pm_cf1 / 20.0 - 1.5
+        slope = 0.786 * w + 0.524 * (1.0 - w)
+        corrected = slope * pm_cf1 - 0.0862 * rh_pct + 5.75
+    elif pm_cf1 < 210.0:
+        corrected = _epa_mid(pm_cf1, rh_pct)
+    elif pm_cf1 < 260.0:
+        # Blend the mid linear form into the high quadratic across
+        # 210 → 260. Every RH-dependent term fades out as w rises,
+        # because the high-concentration piece has no humidity term.
+        w = pm_cf1 / 50.0 - 4.2
+        slope = 0.69 * w + 0.786 * (1.0 - w)
+        corrected = (
+            slope * pm_cf1
+            - 0.0862 * rh_pct * (1.0 - w)
+            + 2.966 * w
+            + 5.75 * (1.0 - w)
+            + 8.84e-4 * pm_cf1**2 * w
+        )
+    else:
+        corrected = _epa_high(pm_cf1)
+    return corrected if corrected > 0.0 else 0.0
+
+
+def _epa_low(pm_cf1: float, rh_pct: float) -> float:
+    """Barkjohn linear form used below 30 µg/m³ (unclamped)."""
+    return 0.524 * pm_cf1 - 0.0862 * rh_pct + 5.75
+
+
+def _epa_mid(pm_cf1: float, rh_pct: float) -> float:
+    """Steeper linear form used from 50 to 210 µg/m³ (unclamped)."""
+    return 0.786 * pm_cf1 - 0.0862 * rh_pct + 5.75
+
+
+def _epa_high(pm_cf1: float) -> float:
+    """Quadratic form used at and above 260 µg/m³ (unclamped).
+
+    Note there is no humidity term: at these concentrations the
+    published fit drops it.
+    """
+    return 2.966 + 0.69 * pm_cf1 + 8.84e-4 * pm_cf1**2
 
 
 def correct_aqandu(pm_cf1: float) -> float:
@@ -299,6 +378,15 @@ def aqi_epa(pm_cf1: float | None, rh_pct: float | None) -> int | None:
     if pm_cf1 is None or rh_pct is None:
         return None
     return pm25_to_aqi(correct_epa(pm_cf1, rh_pct))
+
+
+def aqi_epa_extended(
+    pm_cf1: float | None, rh_pct: float | None
+) -> int | None:
+    """AQI of the piecewise-EPA-corrected density. None if input missing."""
+    if pm_cf1 is None or rh_pct is None:
+        return None
+    return pm25_to_aqi(correct_epa_extended(pm_cf1, rh_pct))
 
 
 def aqi_aqandu(pm_cf1: float | None) -> int | None:

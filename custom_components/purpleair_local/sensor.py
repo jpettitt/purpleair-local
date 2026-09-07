@@ -73,12 +73,14 @@ from .aqi import (
     aqi_band,
     correct_aqandu,
     correct_epa,
+    correct_epa_extended,
     correct_lrapa,
     pm25_to_aqi,
 )
 from .const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
+    AQI_CORRECTION_EPA_EXTENDED,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
     CONF_AQI_COLOR_SCHEME,
@@ -275,6 +277,7 @@ class _PmMassEntity(PurpleAirEntity, SensorEntity):
 _AQI_LABELS: dict[str, str] = {
     AQI_CORRECTION_RAW: "AQI (raw)",
     AQI_CORRECTION_EPA: "AQI (EPA)",
+    AQI_CORRECTION_EPA_EXTENDED: "AQI (EPA extended)",
     AQI_CORRECTION_AQANDU: "AQI (AQandU)",
     AQI_CORRECTION_LRAPA: "AQI (LRAPA)",
 }
@@ -322,7 +325,7 @@ def _aqi_corrected_pm(
         return correct_aqandu(cf1)
     if correction == AQI_CORRECTION_LRAPA:
         return correct_lrapa(cf1)
-    if correction == AQI_CORRECTION_EPA:
+    if correction in (AQI_CORRECTION_EPA, AQI_CORRECTION_EPA_EXTENDED):
         rh = (
             reading.environment.humidity_pct
             if reading.environment is not None
@@ -330,6 +333,8 @@ def _aqi_corrected_pm(
         )
         if rh is None:
             return None
+        if correction == AQI_CORRECTION_EPA_EXTENDED:
+            return correct_epa_extended(cf1, rh)
         return correct_epa(cf1, rh)
     return None
 
