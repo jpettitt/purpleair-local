@@ -1,8 +1,11 @@
 # TODO
 
-Roadmap toward a HACS-installable v0.1.0.
+Shipped work is kept as a historical record with branch and test notes;
+open items are in "Still open" at the bottom.
 
-## v0.1.0 — first usable release
+## Shipped
+
+### v0.1.0 — first usable release
 
 Locked in [DESIGN.md](DESIGN.md). Order matters; each step should be
 landable on its own.
@@ -97,56 +100,23 @@ landable on its own.
     to perform and document in this README section._
 13. **Tag `v0.1.0`** and cut a HACS release.
 
-## Before announcing v0.1.0
+### v0.1.1 — AQI category & colour attributes
 
-- Watch the HACS validator: brand assets now ship in-tree under
-  `custom_components/purpleair_local/brand/` (per the Feb 2026
-  Brands Proxy API change; the brands repo stopped accepting new
-  `custom_integrations/` PRs). The HACS validator still flags
-  missing brands-repo entries — we suppress that with
-  `ignore: brands` in `.github/workflows/validate.yml`. Drop the
-  ignore once the HACS validator recognizes in-tree brand dirs.
+- **AQI category + color as entity attributes** — add
+  `extra_state_attributes` on each `_AqiEntity` exposing `category`
+  (`good` / `moderate` / `unhealthy_for_sensitive_groups` /
+  `unhealthy` / `very_unhealthy` / `hazardous`) and `category_color`
+  (the official EPA hex: `#00e400` / `#ffff00` / `#ff7e00` /
+  `#ff0000` / `#8f3f97` / `#7e0023`). Lets dashboard cards
+  (Mushroom, button-card, the built-in Tile card via templates)
+  color icons by air quality with one line of card config. Optional
+  side: surface the sensor's own `p25aqic` RGB string as
+  `device_color` (uses pre-2024 EPA breakpoints, same caveat as the
+  on-device AQI value). Ship as v0.1.1.
 
-## Before releasing v0.2.0 final
+  _Shipped 2026-05-18._
 
-- ~~Remove the beta callout from the "Live entities (optional)" section
-  of [README.md](README.md).~~ _Done — removed ahead of the v0.2.0
-  stable tag._
-- Confirm live entities behaved over a longer run than the testbed
-  smoke test (no unique_id churn, no runaway polling, live coordinator
-  recovering cleanly after the sensor drops a request).
-- Confirm the block-window handling on a stalling sensor. **Neither unit
-  stalls any more** — the indoor one's cause was a dead Weather
-  Underground Data Processor, removed 2026-09-06, which took it from
-  9 stalls in 48 polls (worst 36.6 s) to 1 in 60 (worst 1.90 s). To
-  reproduce on demand, either re-add a Data Processor pointing at a
-  black-holed address, or firewall a sensor's outbound HTTPS with a
-  DROP rule (not REJECT — it has to hang, not fail fast).
-- **Answered: the second target is a PurpleAir "Data Processor".** It is
-  configured **server-side in the owner's PurpleAir account**, not on the
-  device — which is why the sensor's local `/config` page (a WiFi setup
-  form) has no field for it, and why grepping the device for a setting
-  found nothing. The indoor unit's was a stale Weather Underground link,
-  removed 2026-09-06. This is the actionable fix to offer users whose
-  live endpoint stalls: check the Data Processor settings on the
-  PurpleAir site for a dead third-party target.
-- Consider surfacing upload health as a diagnostic entity — an
-  `uploads_failing` binary sensor, or exposing the `httpsends` minus
-  `httpsuccess` delta. It's the single field that explains live stalls,
-  and users currently have to read raw JSON to find it. Would have
-  turned #7 into a self-diagnosis.
-- Write the v0.2.0 release notes as **one story spanning b1 and b2**,
-  not as a diff against b2. Stable users are coming from v0.1.1 and
-  never saw either pre-release, so the notes need the live-entities
-  feature _and_ the PA-II block-window handling together. A
-  `compare/v0.2.0b2...v0.2.0` changelog link would show almost
-  nothing — link `v0.1.1...v0.2.0` instead.
-- Close [#7](https://github.com/jpettitt/purpleair-local/issues/7) only
-  once the block-window fix is confirmed on hardware that reproduces
-  it. It was reopened after v0.2.0b1 for exactly this reason; don't let
-  the v0.2.0 tag auto-close it by accident.
-
-## Post-v0.1.0 (not committed)
+### v0.2.0 — live (`?live=true`) entities
 
 - **Live (`?live=true`) entities** — requested in
   [#7](https://github.com/jpettitt/purpleair-local/issues/7) for an MVHR
@@ -160,20 +130,25 @@ landable on its own.
   Diagnostics dumps both coordinators. 16 new tests (234 total).
   Endpoint cadence measured on the real dual-laser unit — see the "Live
   entities" section in DESIGN.md for why 15 s and not 10 s._
-- **AQI category + color as entity attributes** — add
-  `extra_state_attributes` on each `_AqiEntity` exposing `category`
-  (`good` / `moderate` / `unhealthy_for_sensitive_groups` /
-  `unhealthy` / `very_unhealthy` / `hazardous`) and `category_color`
-  (the official EPA hex: `#00e400` / `#ffff00` / `#ff7e00` /
-  `#ff0000` / `#8f3f97` / `#7e0023`). Lets dashboard cards
-  (Mushroom, button-card, the built-in Tile card via templates)
-  color icons by air quality with one line of card config. Optional
-  side: surface the sensor's own `p25aqic` RGB string as
-  `device_color` (uses pre-2024 EPA breakpoints, same caveat as the
-  on-device AQI value). Ship as v0.1.1.
-- Zeroconf discovery if PA firmware ever advertises one.
-- Multi-sensor "site average" derived entity (outdoor average of all
-  outdoor sensors).
+
+- **PA-II live block window** — live requests stalled for up to 36 s on
+  some sensors while averaged polls stayed fast.
+  _Done on `issue-7-pa2-live-stalls` and `issue-7-block-window-root-cause`:
+  `?live=true` blocks behind the sensor's once-per-cycle outbound HTTPS —
+  the PurpleAir upload plus one per configured Data Processor. Root cause
+  demonstrated both ways: firewalling a healthy sensor's egress with a
+  DROP rule induced 15 s stalls, and a unit here reproduced it naturally
+  via a dead Weather Underground Data Processor (`response: -11`),
+  fixed by removing that target on the PurpleAir site. Integration no
+  longer retries live requests into the same stall and tolerates brief
+  failure runs (grace period always >60 s). See "The PA-II live block
+  window" in DESIGN.md._
+- Shipped as `v0.2.0b1` → `v0.2.0b2` → **`v0.2.0`** (2026-09-06). The
+  betas were pre-releases so `v0.1.1` stayed "Latest" until the stable
+  tag.
+
+### v0.3.0 — extended EPA correction
+
 - **5-piece extended EPA correction** — the piecewise formula AirNow
   Fire and Smoke Map uses; better than simple Barkjohn above
   ~250 µg/m³.
@@ -187,6 +162,28 @@ landable on its own.
   snippet (`10^-4` is XOR in Python, and `float ^ int` raises).
   Mutation-checked: coefficient typos, inverted blend weights, shifted
   boundaries and a mis-wired entity are all caught._
+
+## Still open
+
+- **Surface upload health as a diagnostic entity** — an
+  `uploads_failing` binary sensor, or the `httpsends` minus
+  `httpsuccess` delta. That single number explains live-endpoint
+  stalls, and users currently have to read raw JSON to find it. Would
+  have turned [#7](https://github.com/jpettitt/purpleair-local/issues/7)
+  into a self-diagnosis.
+- **Drop the HACS `ignore: brands`** in
+  [`.github/workflows/validate.yml`](.github/workflows/validate.yml)
+  once the HACS validator recognises in-tree brand dirs. Brand assets
+  ship under `custom_components/purpleair_local/brand/` per the Feb 2026
+  Brands Proxy API change, but the validator still flags missing
+  brands-repo entries.
+- **Confirm live entities over a long run** — no unique_id churn, no
+  runaway polling, live coordinator recovering cleanly after a dropped
+  request. The testbed smoke test was short.
+- Zeroconf discovery if PA firmware ever advertises one.
+- Multi-sensor "site average" derived entity (outdoor average of all
+  outdoor sensors). Needs to declare whether it consumes the averaged
+  or live series.
 - Smart channel fallback for primary on disagreement (lowest-short-
   term-variance — needs a small rolling history on the coordinator).
   Current v0.1 uses min(a, b) which is conservative for the canonical
