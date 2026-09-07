@@ -50,6 +50,7 @@ from .aqi import (
 from .const import (
     AQI_CORRECTION_AQANDU,
     AQI_CORRECTION_EPA,
+    AQI_CORRECTION_EPA_EXTENDED,
     AQI_CORRECTION_LRAPA,
     AQI_CORRECTION_RAW,
     AQI_CORRECTIONS_ALL,
@@ -200,6 +201,10 @@ class _InvalidResponse(Exception):
 _AQI_OPTION_LABELS: tuple[tuple[str, str], ...] = (
     (AQI_CORRECTION_RAW, "Raw (uncorrected)"),
     (AQI_CORRECTION_EPA, "US EPA (Barkjohn 2021)"),
+    (
+        AQI_CORRECTION_EPA_EXTENDED,
+        "US EPA extended (piecewise, better in heavy smoke)",
+    ),
     (AQI_CORRECTION_AQANDU, "AQandU (University of Utah)"),
     (AQI_CORRECTION_LRAPA, "LRAPA (wood-smoke tuned)"),
 )

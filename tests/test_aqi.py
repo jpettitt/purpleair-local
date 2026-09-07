@@ -18,6 +18,7 @@ from custom_components.purpleair_local.aqi import (
     AQI_COLOR_SCHEMES_ALL,
     AqiCategory,
     aqi_aqandu,
+    aqi_epa_extended,
     aqi_band,
     aqi_category,
     aqi_epa,
@@ -25,6 +26,7 @@ from custom_components.purpleair_local.aqi import (
     aqi_raw,
     correct_aqandu,
     correct_epa,
+    correct_epa_extended,
     correct_lrapa,
     pm25_to_aqi,
 )
@@ -290,3 +292,157 @@ def test_zero_input_yields_zero_aqi_across_methods():
     assert aqi_aqandu(0.0) == 14
     # LRAPA at 0 clamps to 0 → AQI 0
     assert aqi_lrapa(0.0) == 0
+
+
+# --- extended (piecewise) EPA correction ----------------------------------
+#
+# Requested in #15. The implementation in aqi.py deliberately rewrites the
+# published algebra using an explicit blend weight, so these tests check it
+# against a *literal* transcription of the published form below. The two are
+# written differently on purpose — comparing an implementation to a copy of
+# itself proves nothing.
+
+
+def _published_epa_extended(pa: float, rh: float) -> float:
+    """The AirNow five-piece correction, transcribed literally, unclamped.
+
+    Kept deliberately close to how the formula appears in the source
+    material (repeated `pa/50 - 21/5` terms and all) rather than being
+    factored for readability. Its job is to be obviously faithful, not
+    elegant.
+    """
+    if pa < 30:
+        return 0.524 * pa - 0.0862 * rh + 5.75
+    if pa < 50:
+        return (
+            (0.786 * (pa / 20 - 3 / 2) + 0.524 * (1 - (pa / 20 - 3 / 2))) * pa
+            - 0.0862 * rh
+            + 5.75
+        )
+    if pa < 210:
+        return 0.786 * pa - 0.0862 * rh + 5.75
+    if pa < 260:
+        return (
+            (0.69 * (pa / 50 - 21 / 5) + 0.786 * (1 - (pa / 50 - 21 / 5))) * pa
+            - 0.0862 * rh * (1 - (pa / 50 - 21 / 5))
+            + 2.966 * (pa / 50 - 21 / 5)
+            + 5.75 * (1 - (pa / 50 - 21 / 5))
+            + 8.84e-4 * (pa**2) * (pa / 50 - 21 / 5)
+        )
+    return 2.966 + 0.69 * pa + 8.84e-4 * (pa**2)
+
+
+@pytest.mark.parametrize(
+    "pm,rh",
+    [
+        (0.0, 50.0), (5.0, 20.0), (29.9, 50.0), (30.0, 50.0), (35.0, 80.0),
+        (49.9, 10.0), (50.0, 50.0), (120.0, 45.0), (209.9, 65.0),
+        (210.0, 50.0), (225.0, 30.0), (259.9, 90.0), (260.0, 50.0),
+        (300.0, 50.0), (600.0, 20.0), (1000.0, 70.0),
+    ],
+)
+def test_extended_matches_the_published_formula(pm, rh):
+    """Every branch must agree with the literal published transcription."""
+    expected = max(_published_epa_extended(pm, rh), 0.0)
+    assert correct_epa_extended(pm, rh) == pytest.approx(expected, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    "pm,expected",
+    [
+        (10.0, 6.68), (40.0, 27.64), (100.0, 80.04),
+        (235.0, 200.04245), (300.0, 289.526), (500.0, 568.966),
+    ],
+)
+def test_extended_spot_values_at_rh_50(pm, expected):
+    """Absolute values, so a shared error in both transcriptions can't hide."""
+    assert correct_epa_extended(pm, 50.0) == pytest.approx(expected, abs=1e-5)
+
+
+@pytest.mark.parametrize("boundary", [30.0, 50.0, 210.0, 260.0])
+def test_extended_is_continuous_at_every_boundary(boundary):
+    """A step at a piece boundary would put a jump into users' history.
+
+    This is the failure mode piecewise implementations actually have —
+    an off-by-one comparison or a mis-transcribed blend term shows up
+    here and almost nowhere else.
+    """
+    for rh in (10.0, 50.0, 90.0):
+        below = correct_epa_extended(boundary - 1e-9, rh)
+        at = correct_epa_extended(boundary, rh)
+        assert at == pytest.approx(below, abs=1e-6), (
+            f"discontinuity at {boundary} µg/m³ (rh={rh}): "
+            f"{below} -> {at}"
+        )
+
+
+@pytest.mark.parametrize("pm", [0.0, 1.0, 12.5, 25.0, 29.9])
+def test_extended_equals_simple_epa_below_30(pm):
+    """Below 30 the two forms are the same equation; users switching
+    correction mid-history shouldn't see a jump in clean air."""
+    for rh in (20.0, 55.0, 85.0):
+        assert correct_epa_extended(pm, rh) == pytest.approx(
+            correct_epa(pm, rh), abs=1e-9
+        )
+
+
+def test_extended_exceeds_simple_epa_in_heavy_smoke():
+    """The whole point of the extension: the linear form under-reports."""
+    for pm in (250.0, 400.0, 800.0):
+        assert correct_epa_extended(pm, 50.0) > correct_epa(pm, 50.0)
+
+
+def test_extended_high_branch_ignores_humidity():
+    """At and above 260 the published fit drops the RH term entirely."""
+    assert correct_epa_extended(300.0, 10.0) == correct_epa_extended(
+        300.0, 90.0
+    )
+    # ...and just below the top branch it still depends on RH.
+    assert correct_epa_extended(220.0, 10.0) != correct_epa_extended(
+        220.0, 90.0
+    )
+
+
+def test_extended_is_monotonic_in_pm():
+    """More particulate must never produce a lower corrected value."""
+    prev = -1.0
+    pm = 0.0
+    while pm <= 1000.0:
+        cur = correct_epa_extended(pm, 50.0)
+        assert cur >= prev, f"decreased at pm={pm}: {prev} -> {cur}"
+        prev = cur
+        pm += 0.5
+
+
+def test_extended_clamps_negative_to_zero():
+    """Very low PM with high humidity drives the linear form negative."""
+    assert correct_epa_extended(0.0, 100.0) == 0.0
+
+
+@pytest.mark.parametrize("pm", [260.0, 300.0, 512.5, 1000.0])
+def test_extended_high_concentrations_are_finite_and_sane(pm):
+    """Regression guard for the operator bug in the #15 report.
+
+    The contributed snippet used `10^-4` and `pm^2`, where `^` is XOR in
+    Python, not exponentiation: `10^-4` evaluates to -10, and `float ^
+    int` raises TypeError outright. Both terms appear only in the two
+    top branches, so this is the range where that mistake surfaces —
+    and it's invisible in ordinary air.
+    """
+    result = correct_epa_extended(pm, 50.0)
+    assert isinstance(result, float)
+    assert math.isfinite(result)
+    assert result > pm * 0.5, "quadratic tail should not collapse"
+
+
+def test_aqi_epa_extended_none_propagation():
+    assert aqi_epa_extended(None, 50.0) is None
+    assert aqi_epa_extended(10.0, None) is None
+    assert aqi_epa_extended(None, None) is None
+
+
+def test_aqi_epa_extended_returns_an_index():
+    """End-to-end: correction feeds the 2024 breakpoint table."""
+    assert aqi_epa_extended(10.0, 50.0) == pm25_to_aqi(
+        correct_epa_extended(10.0, 50.0)
+    )

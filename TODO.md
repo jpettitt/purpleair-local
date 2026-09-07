@@ -174,9 +174,19 @@ landable on its own.
 - Zeroconf discovery if PA firmware ever advertises one.
 - Multi-sensor "site average" derived entity (outdoor average of all
   outdoor sensors).
-- 5-piece extended EPA correction (the piecewise formula AirNow Fire
-  and Smoke Map uses; better than simple Barkjohn above ~250 µg/m³).
-  Add as an additional option, don't replace `EPA`.
+- **5-piece extended EPA correction** — the piecewise formula AirNow
+  Fire and Smoke Map uses; better than simple Barkjohn above
+  ~250 µg/m³.
+  _Done on `issue-15-epa-extended`: added as `epa_extended`, an
+  additional option that leaves `epa` untouched. Formula reported by
+  @TriskelionTech on
+  [#15](https://github.com/jpettitt/purpleair-local/issues/15). 45 new
+  tests including continuity at all four piece boundaries, agreement
+  with a literal transcription of the published algebra, and a
+  regression guard for the `^`-vs-`**` operator bug in the reported
+  snippet (`10^-4` is XOR in Python, and `float ^ int` raises).
+  Mutation-checked: coefficient typos, inverted blend weights, shifted
+  boundaries and a mis-wired entity are all caught._
 - Smart channel fallback for primary on disagreement (lowest-short-
   term-variance — needs a small rolling history on the coordinator).
   Current v0.1 uses min(a, b) which is conservative for the canonical

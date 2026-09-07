@@ -115,7 +115,7 @@ custom_components/purpleair_local/
 ├── coordinator.py         # DataUpdateCoordinator subclass, one per sensor
 ├── api.py                 # thin httpx/aiohttp client around /json
 ├── models.py              # @dataclass for a parsed sensor reading
-├── aqi.py                 # EPA / AQandU / LRAPA conversions, pure functions
+├── aqi.py                 # EPA / EPA-extended / AQandU / LRAPA, pure funcs
 ├── sensor.py              # SensorEntity definitions
 ├── binary_sensor.py       # channel-disagreement, sensor-online
 ├── diagnostics.py         # redacted dump for bug reports
@@ -344,7 +344,8 @@ Options flow (everything reconfigurable without removing the integration):
   reject the change with a clear error rather than silently rebinding
   to a different physical device.
 - Poll interval (seconds, default 120, min 15).
-- AQI corrections to enable (multi-select: Raw, EPA, AQandU, LRAPA).
+- AQI corrections to enable (multi-select: Raw, EPA, EPA extended,
+  AQandU, LRAPA).
   Default per user: **Raw + EPA**.
 - Channel-disagreement thresholds (see below).
 - Particle-count entities: created by HA but **disabled by default**;
@@ -377,6 +378,7 @@ whichever is healthy):
   diagnostics download.
 - `pm2_5_aqi_epa` — Barkjohn 2021 EPA correction (the formula HA's
   PurpleAir cloud integration also uses)
+- `pm2_5_aqi_epa_extended` — the five-piece EPA correction
 - `pm2_5_aqi_aqandu` — AQandU correction
 - `pm2_5_aqi_lrapa` — LRAPA correction (wood-smoke-tuned)
 
@@ -471,6 +473,19 @@ breakpoint table to produce an integer AQI.
 
 - **EPA (Barkjohn et al., 2021):**
   `corrected = 0.524 * pm_cf1 - 0.0862 * rh + 5.75`
+- **EPA extended** — the five-piece form used by the AirNow Fire and
+  Smoke Map: two linear segments (the one above, plus a steeper
+  `0.786 * pm_cf1 - 0.0862 * rh + 5.75` from 50–210 µg/m³), a quadratic
+  tail `2.966 + 0.69 * pm_cf1 + 8.84e-4 * pm_cf1²` from 260 up, and two
+  crossfade bands joining them at 30–50 and 210–260. Identical to the
+  linear form below 30; roughly double it at 400 µg/m³, which is the
+  point. Added in response to
+  [#15](https://github.com/jpettitt/purpleair-local/issues/15) as an
+  *additional* option — replacing `EPA` would have put a step change
+  into existing users' history. `aqi.py` writes the crossfades with an
+  explicit weight rather than transcribing the published algebra, and
+  the tests check it against a literal transcription so the two can't
+  be wrong in the same way.
 - **AQandU (University of Utah):** `corrected = 0.778 * pm_cf1 + 2.65`
 - **LRAPA (Lane Regional Air Protection Agency, OR):**
   `corrected = 0.5 * pm_cf1 - 0.66` (wood-smoke-tuned; under-corrects
