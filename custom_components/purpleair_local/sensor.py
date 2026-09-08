@@ -295,6 +295,8 @@ def _aqi_corrected_pm(
 
     - `raw`: the channel's `pm2_5_atm` (with the primary-disagreement
       fallback applied for the primary channel).
+    - `epa_extended`: the channel's `pm2_5_atm`, because that variant of
+      the correction was published against the ATM density.
     - `aqandu` / `lrapa` / `epa`: the channel's `pm2_5_cf_1` fed
       through the respective correction formula. EPA additionally
       needs relative humidity; if no BME is present the entity has
@@ -313,6 +315,29 @@ def _aqi_corrected_pm(
             disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
             disagreement_min_pct=disagreement_min_pct,
         )
+
+    rh = (
+        reading.environment.humidity_pct
+        if reading.environment is not None
+        else None
+    )
+
+    # `epa_extended` is the one correction here fit against ATM rather
+    # than CF=1, so it is dispatched before the cf1 lookup. That is not
+    # an inconsistency to tidy up — the piecewise form exists precisely
+    # to undo the Plantower's ATM scaling, so its breakpoints are only
+    # in the right place for an ATM input. See aqi.correct_epa_extended.
+    if correction == AQI_CORRECTION_EPA_EXTENDED:
+        atm = _channel_atm(
+            reading,
+            channel,
+            disagreement_min_diff_ugm3=disagreement_min_diff_ugm3,
+            disagreement_min_pct=disagreement_min_pct,
+        )
+        if atm is None or rh is None:
+            return None
+        return correct_epa_extended(atm, rh)
+
     cf1 = _channel_cf1(
         reading,
         channel,
@@ -325,16 +350,9 @@ def _aqi_corrected_pm(
         return correct_aqandu(cf1)
     if correction == AQI_CORRECTION_LRAPA:
         return correct_lrapa(cf1)
-    if correction in (AQI_CORRECTION_EPA, AQI_CORRECTION_EPA_EXTENDED):
-        rh = (
-            reading.environment.humidity_pct
-            if reading.environment is not None
-            else None
-        )
+    if correction == AQI_CORRECTION_EPA:
         if rh is None:
             return None
-        if correction == AQI_CORRECTION_EPA_EXTENDED:
-            return correct_epa_extended(cf1, rh)
         return correct_epa(cf1, rh)
     return None
 

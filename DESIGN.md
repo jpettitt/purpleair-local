@@ -466,20 +466,23 @@ Runtime behavior:
 ## AQI correction formulas
 
 Three corrections are implemented as pure functions in `aqi.py`. All
-take `pm_cf1` (µg/m³, from `pm2_5_cf_1`) plus `rh` (%, from
-`current_humidity`) where applicable. All return corrected µg/m³,
-clamped at 0, which is then run through the EPA 24-hour PM2.5
-breakpoint table to produce an integer AQI.
+return corrected µg/m³, clamped at 0, which is then run through the EPA
+24-hour PM2.5 breakpoint table to produce an integer AQI. All take
+`pm_cf1` (µg/m³, from `pm2_5_cf_1`) plus `rh` (%, from
+`current_humidity`) where applicable — **except `epa_extended`, which
+takes the ATM density.** That asymmetry is deliberate and is explained
+under "Why the extended correction takes ATM" below.
 
 - **EPA (Barkjohn et al., 2021):**
   `corrected = 0.524 * pm_cf1 - 0.0862 * rh + 5.75`
 - **EPA extended** — the five-piece form used by the AirNow Fire and
-  Smoke Map: two linear segments (the one above, plus a steeper
-  `0.786 * pm_cf1 - 0.0862 * rh + 5.75` from 50–210 µg/m³), a quadratic
-  tail `2.966 + 0.69 * pm_cf1 + 8.84e-4 * pm_cf1²` from 260 up, and two
+  Smoke Map: two linear segments (`0.524 * pm_atm - 0.0862 * rh + 5.75`
+  below 30 µg/m³, plus a steeper
+  `0.786 * pm_atm - 0.0862 * rh + 5.75` from 50–210 µg/m³), a quadratic
+  tail `2.966 + 0.69 * pm_atm + 8.84e-4 * pm_atm²` from 260 up, and two
   crossfade bands joining them at 30–50 and 210–260. Identical to the
-  linear form below 30; roughly double it at 400 µg/m³, which is the
-  point. Added in response to
+  linear form below 30, where ATM and CF=1 are the same number. Added in
+  response to
   [#15](https://github.com/jpettitt/purpleair-local/issues/15) as an
   *additional* option — replacing `EPA` would have put a step change
   into existing users' history. `aqi.py` writes the crossfades with an
@@ -491,10 +494,57 @@ breakpoint table to produce an integer AQI.
   `corrected = 0.5 * pm_cf1 - 0.66` (wood-smoke-tuned; under-corrects
   in non-smoke conditions)
 
-If the EPA's correction evolves further (a 5-piece extension for very
-high concentrations already exists and is what the AirNow Fire and
-Smoke Map uses today), we add it as an additional option rather than
-silently changing what "EPA" means in this integration.
+If the EPA's correction evolves further, we add it as an additional
+option rather than silently changing what "EPA" means here.
+
+### Why the extended correction takes ATM
+
+Every other correction in `aqi.py` takes CF=1. `correct_epa_extended`
+takes ATM. This looks like a bug and has already been written as one
+once, so the reasoning is recorded here.
+
+Barkjohn's team published the extension in **two equivalent forms**
+([EPA webinar, May 2021][ext-deck]):
+
+| | CF=1 form | ATM form |
+| --- | --- | --- |
+| linear slope | 0.524 | 0.786 |
+| high slope | 0.46 | 0.69 |
+| quadratic | 3.93e-4 | 8.84e-4 |
+| constant | 2.97 | 2.966 |
+| breakpoint | 343 | 229 |
+
+The slide carrying the ATM form is headed "Final Correction (cf_atm)"
+and states: *"The PurpleAir US-wide & extended corrections were
+developed using cf=1 [higher] … If cf_atm must be used due to API
+limitations this piecewise equation may be used."* Most consumers reach
+PurpleAir through an API exposing only ATM; we read the device directly
+and have both.
+
+The two are **the same curve in different units**. A Plantower reports
+ATM = CF=1 below 30 µg/m³ and ATM ≈ CF=1 × ⅔ above ~80 (the [2024
+corrigendum][corr] to Barkjohn 2022 gives cf_atm/cf_1 = 0.66 at
+cf_1 = 80). Every ATM coefficient is its CF=1 twin scaled by that ratio:
+`0.69 × ⅔ = 0.46` exactly, `8.84e-4 × (⅔)² = 3.93e-4`,
+`343 × ⅔ = 228.7 ≈ 229`. The 30–50 crossfade band is precisely the span
+over which a Plantower transitions between the two densities.
+
+So the piecewise structure exists **only to undo the sensor's internal
+ATM scaling**. Its breakpoints land in the right place for an ATM input
+and nowhere useful otherwise. Fed CF=1 it returns ~290 µg/m³ where the
+answer is ~159 — invisible in clean air, two AQI categories out in
+smoke. That is what shipped in `v0.3.0b1`, caught by @TriskelionTech
+on [#15](https://github.com/jpettitt/purpleair-local/issues/15) before
+the stable release.
+
+We use the ATM form rather than the CF=1 two-piece because it is what
+"EPA extended" means to everyone else implementing it, and the curves
+are equivalent anyway. `tests/test_aqi.py` pins the equivalence in both
+the linear and quadratic regions, so a future "cleanup" that switches
+the input back fails loudly instead of quietly mis-reporting smoke.
+
+[ext-deck]: https://www.epa.gov/sites/default/files/2021-05/documents/toolsresourceswebinar_purpleairsmoke_210519b.pdf
+[corr]: https://doi.org/10.3390/s24247871
 
 ### AQI breakpoint table
 

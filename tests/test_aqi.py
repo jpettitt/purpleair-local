@@ -359,6 +359,98 @@ def test_extended_spot_values_at_rh_50(pm, expected):
     assert correct_epa_extended(pm, 50.0) == pytest.approx(expected, abs=1e-5)
 
 
+# --- the ATM-vs-CF=1 input, and why it is not a mistake -------------------
+#
+# Barkjohn's team published the extension twice: a two-piece form on CF=1
+# and this piecewise form on ATM, the latter "if cf_atm must be used due
+# to API limitations". They are the same curve, because a Plantower
+# reports ATM == CF=1 below 30 µg/m³ and ATM ~= CF=1 x 2/3 above ~80.
+#
+# These tests pin that equivalence. They are the ones that fail loudly if
+# anyone "tidies up" correct_epa_extended to take pm_cf1 like every other
+# correction in this module — which is exactly the bug that shipped in
+# v0.3.0b1 and is invisible in clean air.
+
+# ATM/CF=1 ratio above the Plantower's transition zone. The 2024
+# corrigendum to Barkjohn 2022 states cf_atm/cf_1 = 0.66 at cf_1 = 80;
+# 2/3 is that ratio unrounded, and it is what makes the published
+# coefficients line up exactly (0.69 * 2/3 = 0.46).
+_ATM_OVER_CF1 = 2.0 / 3.0
+
+
+def _published_epa_extended_cf1(cf1: float, rh: float) -> float:
+    """The *other* published extension: two pieces, CF=1 input, unclamped.
+
+    From the same EPA deck's "Final Correction" slide. Transcribed
+    literally, like `_published_epa_extended`.
+    """
+    if cf1 <= 343:
+        return 0.524 * cf1 - 0.0862 * rh + 5.75
+    return 0.46 * cf1 + 3.93e-4 * cf1**2 + 2.97
+
+
+@pytest.mark.parametrize("cf1", [80.0, 100.0, 150.0, 200.0, 250.0, 300.0, 315.0])
+@pytest.mark.parametrize("rh", [10.0, 50.0, 90.0])
+def test_extended_on_atm_equals_the_cf1_form_in_the_linear_region(cf1, rh):
+    """Both linear pieces: the two published forms agree exactly.
+
+    0.786 is 0.524 / (2/3), so this is an algebraic identity, not a fit.
+    Covers cf_1 80..315, i.e. ATM 53..210 — above the Plantower
+    transition zone and below the extended form's quadratic blend.
+    """
+    atm = cf1 * _ATM_OVER_CF1
+    assert correct_epa_extended(atm, rh) == pytest.approx(
+        _published_epa_extended_cf1(cf1, rh), abs=1e-9
+    )
+
+
+@pytest.mark.parametrize("cf1", [390.0, 450.0, 600.0, 900.0, 1500.0])
+def test_extended_on_atm_matches_the_cf1_form_in_the_quadratic_region(cf1):
+    """Both quadratic tails, to the precision the coefficients are published at.
+
+    Not exact here: 8.84e-4 * (2/3)^2 = 3.9289e-4 against a published
+    3.93e-4, and 2.966 against 2.97. Agreement to 0.1 % is the most the
+    rounding allows, and is still far tighter than the ~80 % error that
+    feeding CF=1 into this function produces.
+    """
+    atm = cf1 * _ATM_OVER_CF1
+    assert correct_epa_extended(atm, 50.0) == pytest.approx(
+        _published_epa_extended_cf1(cf1, 50.0), rel=1e-3
+    )
+
+
+def test_extended_breakpoints_are_the_cf1_breakpoints_rescaled():
+    """Every boundary is a CF=1 boundary times 2/3.
+
+    This is the tell that the piecewise structure exists only to undo
+    the Plantower's ATM scaling. 343 is where the published CF=1 form
+    switches to its quadratic; the deck's ATM form switches at 229.
+    """
+    assert 343.0 * _ATM_OVER_CF1 == pytest.approx(228.7, abs=0.1)
+    # The 30 -> 50 blend spans the Plantower's own transition: the 2024
+    # corrigendum puts it at cf_1 30 (ratio 1.0) through cf_1 80 (0.66).
+    assert 30.0 * 1.0 == pytest.approx(30.0)
+    assert 80.0 * 0.66 == pytest.approx(52.8, abs=0.1)
+
+
+def test_feeding_cf1_to_the_extended_form_is_badly_wrong_in_smoke():
+    """The regression this whole section exists for.
+
+    At 200 µg/m³ ATM (= 300 CF=1) the correct answer is ~159; feeding
+    CF=1 gives ~290. Two AQI categories apart. If this assertion ever
+    fails because the two got close, the input handling changed.
+    """
+    atm = 200.0
+    cf1 = atm / _ATM_OVER_CF1
+
+    correct = correct_epa_extended(atm, 50.0)
+    wrong = correct_epa_extended(cf1, 50.0)
+
+    assert correct == pytest.approx(158.64, abs=0.01)
+    assert wrong == pytest.approx(289.53, abs=0.01)
+    assert wrong / correct > 1.5
+
+
 @pytest.mark.parametrize("boundary", [30.0, 50.0, 210.0, 260.0])
 def test_extended_is_continuous_at_every_boundary(boundary):
     """A step at a piece boundary would put a jump into users' history.
