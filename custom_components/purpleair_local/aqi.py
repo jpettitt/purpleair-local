@@ -1,4 +1,4 @@
-"""PurpleAir mass-to-AQI conversions, with three published corrections.
+"""PurpleAir mass-to-AQI conversions, with four published corrections.
 
 Four corrections are implemented as pure functions. Each takes one
 PM2.5 reading (and humidity, for the EPA ones) and returns a corrected
@@ -32,10 +32,11 @@ who want what the sensor itself reports without any post-processing.
 
 Inputs
 ------
-All corrections take `pm_cf1` (the `pm2_5_cf_1` field from the sensor).
-This is the "CF=1" density estimate, which is what every published
-correction was fit against. RH is in percent, matching the sensor's
-`current_humidity` field. Negative corrected values are clamped to 0.
+Every correction takes `pm_cf1` (the `pm2_5_cf_1` field from the
+sensor, the "CF=1" density estimate) except `correct_epa_extended`,
+which takes the ATM density; its docstring explains why. RH is in
+percent, matching the sensor's `current_humidity` field. Negative
+corrected values are clamped to 0.
 
 AQI breakpoints
 ---------------
@@ -251,7 +252,7 @@ def correct_epa_extended(pm_atm: float, rh_pct: float) -> float:
     asymmetry is real, not an oversight, so please read the next two
     paragraphs before "fixing" it.
 
-    Barkjohn's team published the extension in two equivalent forms: a
+    Barkjohn's team published the extension in two forms: a
     two-piece one on CF=1 (`0.524·x − 0.0862·RH + 5.75` up to x = 343,
     then `0.46·x + 3.93e-4·x² + 2.97`), and this piecewise one on ATM,
     offered because most consumers reach PurpleAir through an API that
@@ -259,13 +260,16 @@ def correct_epa_extended(pm_atm: float, rh_pct: float) -> float:
     Correction (cf_atm)" and says outright: "If cf_atm must be used due
     to API limitations this piecewise equation may be used."
 
-    The two are the same curve in different units, because a Plantower
-    reports ATM = CF=1 below 30 µg/m³ and ATM ≈ CF=1 × ⅔ above ~80. Every
-    coefficient here is its CF=1 twin scaled by that ratio — 0.69 × ⅔ =
-    0.46 exactly, 8.84e-4 × (⅔)² = 3.93e-4, breakpoint 343 × ⅔ = 229 —
-    and the 30 → 50 blend band is exactly the span over which a Plantower
-    transitions between the two densities. In other words the piecewise
-    structure exists *only* to undo the sensor's internal ATM scaling.
+    Outside the 30 → 50 blend band the two are the same curve in
+    different units, because a Plantower reports ATM = CF=1 below
+    30 µg/m³ and ATM ≈ CF=1 × ⅔ above ~80. Every coefficient here is its
+    CF=1 twin scaled by that ratio — 0.69 × ⅔ = 0.46 exactly,
+    8.84e-4 × (⅔)² = 3.93e-4, breakpoint 343 × ⅔ = 229 — and the blend
+    band roughly covers the Plantower's transition between the two
+    densities; inside it the forms only approximate each other (5 %
+    apart on the hardware capture in DESIGN.md). In other words the
+    piecewise structure exists *only* to undo the sensor's internal ATM
+    scaling.
     Feed it CF=1 and every breakpoint lands in the wrong place: at 200
     µg/m³ ATM it returns ~290 where the answer is ~159, an error that is
     invisible in clean air (where ATM == CF=1) and worth two AQI

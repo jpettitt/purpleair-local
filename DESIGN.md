@@ -98,9 +98,10 @@ Environment (only present if the BME280/BME680 is detected):
 
 Why `cf_1` vs `atm` matters: PurpleAir applies both Plantower density curves
 to every reading. `cf_1` ("indoor" curve) tends to read higher; `atm`
-("atmospheric" curve) is what's typically reported outdoors. **Every
-published AQI correction formula takes `pm2_5_cf_1` as input**, so we keep
-that one regardless of where the sensor is placed.
+("atmospheric" curve) is what's typically reported outdoors. **Every AQI
+correction here takes `pm2_5_cf_1` except EPA extended, which takes
+`atm`** (see "Why the extended correction takes ATM"), so we keep both
+regardless of where the sensor is placed.
 
 ## Architecture
 
@@ -382,9 +383,9 @@ whichever is healthy):
 - `pm2_5_aqi_aqandu` — AQandU correction
 - `pm2_5_aqi_lrapa` — LRAPA correction (wood-smoke-tuned)
 
-The corrections all consume `pm2_5_cf_1` plus relative humidity; we hold the
-formulas in `aqi.py` as pure functions and unit-test them against published
-worked examples.
+The corrections consume `pm2_5_cf_1` (EPA extended: `pm2_5_atm`) plus
+relative humidity; we hold the formulas in `aqi.py` as pure functions and
+unit-test them against published worked examples.
 
 **Particle counts** (per channel, hidden by default — useful but noisy):
 `p_0_3_um`, `p_0_5_um`, `p_1_0_um`, `p_2_5_um`, `p_5_0_um`, `p_10_0_um`.
@@ -465,7 +466,7 @@ Runtime behavior:
 
 ## AQI correction formulas
 
-Three corrections are implemented as pure functions in `aqi.py`. All
+Four corrections are implemented as pure functions in `aqi.py`. All
 return corrected µg/m³, clamped at 0, which is then run through the EPA
 24-hour PM2.5 breakpoint table to produce an integer AQI. All take
 `pm_cf1` (µg/m³, from `pm2_5_cf_1`) plus `rh` (%, from
@@ -503,7 +504,7 @@ Every other correction in `aqi.py` takes CF=1. `correct_epa_extended`
 takes ATM. This looks like a bug and has already been written as one
 once, so the reasoning is recorded here.
 
-Barkjohn's team published the extension in **two equivalent forms**
+Barkjohn's team published the extension in **two forms**
 ([EPA webinar, May 2021][ext-deck]):
 
 | | CF=1 form | ATM form |
@@ -521,13 +522,15 @@ limitations this piecewise equation may be used."* Most consumers reach
 PurpleAir through an API exposing only ATM; we read the device directly
 and have both.
 
-The two are **the same curve in different units**. A Plantower reports
-ATM = CF=1 below 30 µg/m³ and ATM ≈ CF=1 × ⅔ above ~80 (the [2024
-corrigendum][corr] to Barkjohn 2022 gives cf_atm/cf_1 = 0.66 at
-cf_1 = 80). Every ATM coefficient is its CF=1 twin scaled by that ratio:
-`0.69 × ⅔ = 0.46` exactly, `8.84e-4 × (⅔)² = 3.93e-4`,
-`343 × ⅔ = 228.7 ≈ 229`. The 30–50 crossfade band is precisely the span
-over which a Plantower transitions between the two densities.
+Outside the 30–50 crossfade band the two are **the same curve in
+different units**. A Plantower reports ATM = CF=1 below 30 µg/m³ and
+ATM ≈ CF=1 × ⅔ above ~80 (the [2024 corrigendum][corr] to Barkjohn 2022
+gives cf_atm/cf_1 = 0.66 at cf_1 = 80). Every ATM coefficient is its
+CF=1 twin scaled by that ratio: `0.69 × ⅔ = 0.46` exactly,
+`8.84e-4 × (⅔)² = 3.93e-4`, `343 × ⅔ = 228.7 ≈ 229`. The crossfade band
+roughly covers the span over which a Plantower transitions between the
+two densities (cf_1 30 → 80 is ATM 30 → ~53); inside it the two forms
+only approximate each other, 5 % apart on the capture below.
 
 So the piecewise structure exists **only to undo the sensor's internal
 ATM scaling**. Its breakpoints land in the right place for an ATM input
@@ -538,13 +541,52 @@ on [#15](https://github.com/jpettitt/purpleair-local/issues/15) before
 the stable release.
 
 We use the ATM form rather than the CF=1 two-piece because it is what
-"EPA extended" means to everyone else implementing it, and the curves
-are equivalent anyway. `tests/test_aqi.py` pins the equivalence in both
-the linear and quadratic regions, so a future "cleanup" that switches
-the input back fails loudly instead of quietly mis-reporting smoke.
+"EPA extended" means to everyone else implementing it, and outside the
+crossfade band the curves are equivalent anyway. `tests/test_aqi.py`
+pins the equivalence in both the linear and quadratic regions, so a
+future "cleanup" that switches the input back fails loudly instead of
+quietly mis-reporting smoke.
+
+#### Confirmed against another vendor's hardware
+
+The argument above is from published coefficients and algebra. It also
+holds empirically. An **AirGradient** monitor (I-9PSL, firmware 3.7.0)
+runs the same five-piece correction ([`PMSBase::compensate`][ag-pms]) on
+the `pm02` (ATM) and `rhum` it reports, and publishes the result as
+`pm02Compensated` ([`getCorrectedPM25`][ag-value]). It also reports
+CF=1 as `pm02Standard`. Polled every 12 s across a decaying smoke plume:
+
+| `pm02` (ATM) | `pm02Standard` (CF=1) | ATM/CF=1 | `rhum` | device | `correct_epa_extended(atm, rh)` | branch |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 628.00 | 942.83 | 0.666 | 35.21 | 784.92 | 784.921 | quadratic ≥260 |
+| 114.00 | 172.00 | 0.663 | 35.17 | 92.32 | 92.322 | mid linear |
+| 68.00 | 103.17 | 0.659 | 35.27 | 56.16 | 56.158 | mid linear |
+| 49.67 | 70.00 | 0.710 | 35.33 | 41.53 | 41.530 | crossfade 30–50 |
+| 27.50 | 27.50 | 1.000 | 35.81 | 17.07 | 17.073 | low <30 |
+| 25.83 | 25.83 | 1.000 | 35.77 | 16.20 | 16.202 | low <30 |
+
+Every row reproduces within the rounding of the device's two-decimal
+fields, and `tests/test_aqi.py` pins them. Four of the five branches are
+covered; the 210–260 crossfade was skipped because the plume fell from
+628 to 114 between consecutive polls.
+
+The formula is fed **ATM**: fed CF=1 instead, the top row would read
+1439, and the linear `correct_epa` on CF=1 gives 497. The vendor's
+setting is labelled `epa_2021` but runs the **five-piece extension**,
+not the linear Barkjohn the name suggests. Its humidity input is the raw
+`rhum`, not `rhumCompensated`, which matters when repeating this check
+on a unit with a humidity correction enabled.
+
+The ATM/CF=1 column is the density transition the piecewise structure
+undoes: 1.000 below 30 and ≈⅔ from ~100 up, matching the [2024
+corrigendum][corr]'s 1.00 up to cf_1 = 30 and 0.66 at cf_1 = 80. On the
+crossfade row the two published forms are 5 % apart (41.53 against the
+CF=1 two-piece's 39.38).
 
 [ext-deck]: https://www.epa.gov/sites/default/files/2021-05/documents/toolsresourceswebinar_purpleairsmoke_210519b.pdf
 [corr]: https://doi.org/10.3390/s24247871
+[ag-pms]: https://github.com/airgradienthq/arduino/blob/3.7.0/src/PMS/PMS.cpp
+[ag-value]: https://github.com/airgradienthq/arduino/blob/3.7.0/src/AgValue.cpp
 
 ### AQI breakpoint table
 

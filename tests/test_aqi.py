@@ -363,8 +363,9 @@ def test_extended_spot_values_at_rh_50(pm, expected):
 #
 # Barkjohn's team published the extension twice: a two-piece form on CF=1
 # and this piecewise form on ATM, the latter "if cf_atm must be used due
-# to API limitations". They are the same curve, because a Plantower
-# reports ATM == CF=1 below 30 µg/m³ and ATM ~= CF=1 x 2/3 above ~80.
+# to API limitations". Outside the 30 -> 50 blend they are the same curve,
+# because a Plantower reports ATM == CF=1 below 30 µg/m³ and
+# ATM ~= CF=1 x 2/3 above ~80.
 #
 # These tests pin that equivalence. They are the ones that fail loudly if
 # anyone "tidies up" correct_epa_extended to take pm_cf1 like every other
@@ -427,7 +428,7 @@ def test_extended_breakpoints_are_the_cf1_breakpoints_rescaled():
     switches to its quadratic; the deck's ATM form switches at 229.
     """
     assert 343.0 * _ATM_OVER_CF1 == pytest.approx(228.7, abs=0.1)
-    # The 30 -> 50 blend spans the Plantower's own transition: the 2024
+    # The 30 -> 50 blend roughly covers the Plantower's transition: the 2024
     # corrigendum puts it at cf_1 30 (ratio 1.0) through cf_1 80 (0.66).
     assert 30.0 * 1.0 == pytest.approx(30.0)
     assert 80.0 * 0.66 == pytest.approx(52.8, abs=0.1)
@@ -449,6 +450,28 @@ def test_feeding_cf1_to_the_extended_form_is_badly_wrong_in_smoke():
     assert correct == pytest.approx(158.64, abs=0.01)
     assert wrong == pytest.approx(289.53, abs=0.01)
     assert wrong / correct > 1.5
+
+
+# AirGradient firmware 3.7.0 runs this same five-piece correction on the
+# pm02 (ATM) and rhum it reports; rows from DESIGN.md's capture. Every
+# field is rounded to 2 dp, which on the quadratic row (slope ~1.8)
+# allows up to ~0.015 of disagreement.
+@pytest.mark.parametrize(
+    ("atm", "rh", "device"),
+    [
+        (628.00, 35.21, 784.92),
+        (114.00, 35.17, 92.32),
+        (68.00, 35.27, 56.16),
+        (49.67, 35.33, 41.53),
+        (27.50, 35.81, 17.07),
+        (25.83, 35.77, 16.20),
+    ],
+)
+def test_extended_matches_airgradient_hardware(
+    atm: float, rh: float, device: float
+) -> None:
+    """Fed ATM, the formula reproduces a vendor's firmware output."""
+    assert correct_epa_extended(atm, rh) == pytest.approx(device, abs=0.015)
 
 
 @pytest.mark.parametrize("boundary", [30.0, 50.0, 210.0, 260.0])
