@@ -694,10 +694,17 @@ def test_epa_extended_creates_its_own_entity():
     assert f"{sid}_primary_aqi_epa_extended" in ids
 
 
-def test_epa_extended_entity_uses_the_piecewise_formula():
-    """Value must come from correct_epa_extended on the cf_1 average."""
+def test_epa_extended_entity_uses_the_piecewise_formula_on_atm():
+    """Value must come from correct_epa_extended on the *ATM* average.
+
+    The published piecewise form takes ATM, not CF=1 (see
+    aqi.correct_epa_extended). Feeding it cf_1 — which every other
+    correction here takes — is the bug this pins: it looks correct in
+    clean air and is ~80 % high in smoke.
+    """
     payload = _dual_payload(pm25_a=200.0, pm25_b=300.0, rh=50.0)
-    # cf1 = atm * 1.5 in the synthetic payload: A 300, B 450, primary 375.
+    # Synthetic payload sets cf1 = atm * 1.5. ATM: A 200, B 300,
+    # primary 250. CF=1: A 300, B 450, primary 375.
     by_id = _by_unique_id(
         build_entities(
             _coordinator(payload),
@@ -705,9 +712,10 @@ def test_epa_extended_entity_uses_the_piecewise_formula():
         )
     )
     sid = payload["SensorId"]
-    expected = pm25_to_aqi(correct_epa_extended(375.0, 50.0))
+    value = by_id[f"{sid}_primary_aqi_epa_extended"].native_value
 
-    assert by_id[f"{sid}_primary_aqi_epa_extended"].native_value == expected
+    assert value == pm25_to_aqi(correct_epa_extended(250.0, 50.0))
+    assert value != pm25_to_aqi(correct_epa_extended(375.0, 50.0))
 
 
 def test_epa_extended_diverges_from_epa_in_heavy_smoke():

@@ -163,6 +163,16 @@ landable on its own.
   Mutation-checked: coefficient typos, inverted blend weights, shifted
   boundaries and a mis-wired entity are all caught._
 
+  _Fixed after `v0.3.0b1` on `issue-15-extended-uses-atm`: the beta fed
+  the formula `pm2_5_cf_1`. The five-piece form is the **ATM** variant —
+  @TriskelionTech spotted it and was right. Its coefficients are the
+  CF=1 ones scaled by the Plantower's ⅔ ATM ratio (`0.69 × ⅔ = 0.46`,
+  breakpoint `343 × ⅔ = 229`), so the piecewise structure exists only to
+  undo that scaling and CF=1 input put every breakpoint in the wrong
+  place — ~80 % high in smoke, exact in clean air. 28 new tests pin the
+  equivalence to the published CF=1 two-piece form. See "Why the
+  extended correction takes ATM" in DESIGN.md._
+
 ## Still open
 
 - **Surface upload health as a diagnostic entity** — an

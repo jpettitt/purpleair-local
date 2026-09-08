@@ -238,13 +238,38 @@ def correct_epa(pm_cf1: float, rh_pct: float) -> float:
     return corrected if corrected > 0.0 else 0.0
 
 
-def correct_epa_extended(pm_cf1: float, rh_pct: float) -> float:
+def correct_epa_extended(pm_atm: float, rh_pct: float) -> float:
     """Piecewise EPA correction, valid into heavy-smoke concentrations.
 
     The AirNow Fire and Smoke Map's five-piece extension of Barkjohn
     2021. Below 30 µg/m³ it is identical to `correct_epa`; above ~210 it
     switches to a quadratic fit that stops the simple linear form
     under-reporting during wildfire smoke.
+
+    **This one takes ATM, not CF=1** — unlike `correct_epa`,
+    `correct_aqandu` and `correct_lrapa`, which all take `pm_cf1`. The
+    asymmetry is real, not an oversight, so please read the next two
+    paragraphs before "fixing" it.
+
+    Barkjohn's team published the extension in two equivalent forms: a
+    two-piece one on CF=1 (`0.524·x − 0.0862·RH + 5.75` up to x = 343,
+    then `0.46·x + 3.93e-4·x² + 2.97`), and this piecewise one on ATM,
+    offered because most consumers reach PurpleAir through an API that
+    exposes only ATM. The slide presenting it is headed "Final
+    Correction (cf_atm)" and says outright: "If cf_atm must be used due
+    to API limitations this piecewise equation may be used."
+
+    The two are the same curve in different units, because a Plantower
+    reports ATM = CF=1 below 30 µg/m³ and ATM ≈ CF=1 × ⅔ above ~80. Every
+    coefficient here is its CF=1 twin scaled by that ratio — 0.69 × ⅔ =
+    0.46 exactly, 8.84e-4 × (⅔)² = 3.93e-4, breakpoint 343 × ⅔ = 229 —
+    and the 30 → 50 blend band is exactly the span over which a Plantower
+    transitions between the two densities. In other words the piecewise
+    structure exists *only* to undo the sensor's internal ATM scaling.
+    Feed it CF=1 and every breakpoint lands in the wrong place: at 200
+    µg/m³ ATM it returns ~290 where the answer is ~159, an error that is
+    invisible in clean air (where ATM == CF=1) and worth two AQI
+    categories in smoke.
 
     The five pieces are two plain linear segments, a quadratic tail, and
     two blend bands that interpolate between them. Rather than
@@ -258,58 +283,60 @@ def correct_epa_extended(pm_cf1: float, rh_pct: float) -> float:
     implementation that drifts at a boundary would put a step change
     into users' history.
 
-    Takes `pm_cf1`, not the ATM density: like every correction here it
-    was fit against the CF=1 estimate. Those two are equal at low
-    concentrations on a PA-II and diverge exactly where this formula
-    matters, so feeding ATM would be wrong in a way that is invisible in
-    clean air.
-
     Negative outputs are clamped to 0, matching `correct_epa`.
     """
-    if pm_cf1 < 30.0:
-        corrected = _epa_low(pm_cf1, rh_pct)
-    elif pm_cf1 < 50.0:
+    if pm_atm < 30.0:
+        corrected = _epa_low(pm_atm, rh_pct)
+    elif pm_atm < 50.0:
         # Blend the two linear slopes across 30 → 50.
-        w = pm_cf1 / 20.0 - 1.5
+        w = pm_atm / 20.0 - 1.5
         slope = 0.786 * w + 0.524 * (1.0 - w)
-        corrected = slope * pm_cf1 - 0.0862 * rh_pct + 5.75
-    elif pm_cf1 < 210.0:
-        corrected = _epa_mid(pm_cf1, rh_pct)
-    elif pm_cf1 < 260.0:
+        corrected = slope * pm_atm - 0.0862 * rh_pct + 5.75
+    elif pm_atm < 210.0:
+        corrected = _epa_mid(pm_atm, rh_pct)
+    elif pm_atm < 260.0:
         # Blend the mid linear form into the high quadratic across
         # 210 → 260. Every RH-dependent term fades out as w rises,
         # because the high-concentration piece has no humidity term.
-        w = pm_cf1 / 50.0 - 4.2
+        w = pm_atm / 50.0 - 4.2
         slope = 0.69 * w + 0.786 * (1.0 - w)
         corrected = (
-            slope * pm_cf1
+            slope * pm_atm
             - 0.0862 * rh_pct * (1.0 - w)
             + 2.966 * w
             + 5.75 * (1.0 - w)
-            + 8.84e-4 * pm_cf1**2 * w
+            + 8.84e-4 * pm_atm**2 * w
         )
     else:
-        corrected = _epa_high(pm_cf1)
+        corrected = _epa_high(pm_atm)
     return corrected if corrected > 0.0 else 0.0
 
 
-def _epa_low(pm_cf1: float, rh_pct: float) -> float:
-    """Barkjohn linear form used below 30 µg/m³ (unclamped)."""
-    return 0.524 * pm_cf1 - 0.0862 * rh_pct + 5.75
+def _epa_low(pm_atm: float, rh_pct: float) -> float:
+    """Barkjohn linear form used below 30 µg/m³ (unclamped).
+
+    Identical to `correct_epa` because below 30 µg/m³ a Plantower's ATM
+    and CF=1 densities are the same number.
+    """
+    return 0.524 * pm_atm - 0.0862 * rh_pct + 5.75
 
 
-def _epa_mid(pm_cf1: float, rh_pct: float) -> float:
-    """Steeper linear form used from 50 to 210 µg/m³ (unclamped)."""
-    return 0.786 * pm_cf1 - 0.0862 * rh_pct + 5.75
+def _epa_mid(pm_atm: float, rh_pct: float) -> float:
+    """Steeper linear form used from 50 to 210 µg/m³ (unclamped).
+
+    0.786 is 0.524 / (⅔): the same US-wide slope, restated for an input
+    that is now ⅔ of the CF=1 density the original was fit against.
+    """
+    return 0.786 * pm_atm - 0.0862 * rh_pct + 5.75
 
 
-def _epa_high(pm_cf1: float) -> float:
+def _epa_high(pm_atm: float) -> float:
     """Quadratic form used at and above 260 µg/m³ (unclamped).
 
     Note there is no humidity term: at these concentrations the
     published fit drops it.
     """
-    return 2.966 + 0.69 * pm_cf1 + 8.84e-4 * pm_cf1**2
+    return 2.966 + 0.69 * pm_atm + 8.84e-4 * pm_atm**2
 
 
 def correct_aqandu(pm_cf1: float) -> float:
@@ -381,12 +408,15 @@ def aqi_epa(pm_cf1: float | None, rh_pct: float | None) -> int | None:
 
 
 def aqi_epa_extended(
-    pm_cf1: float | None, rh_pct: float | None
+    pm_atm: float | None, rh_pct: float | None
 ) -> int | None:
-    """AQI of the piecewise-EPA-corrected density. None if input missing."""
-    if pm_cf1 is None or rh_pct is None:
+    """AQI of the piecewise-EPA-corrected density. None if input missing.
+
+    Takes the ATM density, not CF=1 — see `correct_epa_extended`.
+    """
+    if pm_atm is None or rh_pct is None:
         return None
-    return pm25_to_aqi(correct_epa_extended(pm_cf1, rh_pct))
+    return pm25_to_aqi(correct_epa_extended(pm_atm, rh_pct))
 
 
 def aqi_aqandu(pm_cf1: float | None) -> int | None:
