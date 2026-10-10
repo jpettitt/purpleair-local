@@ -19,7 +19,7 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlow,
+    OptionsFlowWithReload,
 )
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
@@ -111,8 +111,8 @@ class PurpleAirConfigFlow(ConfigFlow, domain=DOMAIN):
                 # SensorId (MAC) is the canonical identifier for this
                 # physical device. If the user re-adds the same sensor
                 # after its DHCP IP changed, _abort_if_unique_id_configured
-                # will update the existing entry's host instead of
-                # creating a duplicate.
+                # updates the existing entry's host and reloads it instead
+                # of creating a duplicate.
                 await self.async_set_unique_id(reading.sensor_id)
                 self._abort_if_unique_id_configured(updates={CONF_HOST: host})
 
@@ -217,7 +217,7 @@ _COLOR_SCHEME_OPTION_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
-class PurpleAirOptionsFlow(OptionsFlow):
+class PurpleAirOptionsFlow(OptionsFlowWithReload):
     """Editable settings for a configured sensor.
 
     Single-step flow with six fields:
@@ -264,6 +264,25 @@ class PurpleAirOptionsFlow(OptionsFlow):
                         errors["base"] = "sensor_mismatch"
 
             if not errors:
+                options = {
+                    CONF_SCAN_INTERVAL_S: int(
+                        user_input[CONF_SCAN_INTERVAL_S]
+                    ),
+                    CONF_LIVE_ENTITIES: bool(user_input[CONF_LIVE_ENTITIES]),
+                    CONF_LIVE_SCAN_INTERVAL_S: int(
+                        user_input[CONF_LIVE_SCAN_INTERVAL_S]
+                    ),
+                    CONF_AQI_CORRECTIONS: list(
+                        user_input[CONF_AQI_CORRECTIONS]
+                    ),
+                    CONF_AQI_COLOR_SCHEME: user_input[CONF_AQI_COLOR_SCHEME],
+                    CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: float(
+                        user_input[CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3]
+                    ),
+                    CONF_CHANNEL_DISAGREEMENT_MIN_PCT: float(
+                        user_input[CONF_CHANNEL_DISAGREEMENT_MIN_PCT]
+                    ),
+                }
                 if host_changed:
                     self.hass.config_entries.async_update_entry(
                         self.config_entry,
@@ -272,33 +291,15 @@ class PurpleAirOptionsFlow(OptionsFlow):
                             CONF_HOST: new_host,
                         },
                     )
+                    # OptionsFlowWithReload reloads only when the options
+                    # change (by the same `!=` HA applies), so a host-only
+                    # edit schedules its own; doing both would reload twice.
+                    if options == self.config_entry.options:
+                        self.hass.config_entries.async_schedule_reload(
+                            self.config_entry.entry_id
+                        )
 
-                return self.async_create_entry(
-                    title="",
-                    data={
-                        CONF_SCAN_INTERVAL_S: int(
-                            user_input[CONF_SCAN_INTERVAL_S]
-                        ),
-                        CONF_LIVE_ENTITIES: bool(
-                            user_input[CONF_LIVE_ENTITIES]
-                        ),
-                        CONF_LIVE_SCAN_INTERVAL_S: int(
-                            user_input[CONF_LIVE_SCAN_INTERVAL_S]
-                        ),
-                        CONF_AQI_CORRECTIONS: list(
-                            user_input[CONF_AQI_CORRECTIONS]
-                        ),
-                        CONF_AQI_COLOR_SCHEME: user_input[
-                            CONF_AQI_COLOR_SCHEME
-                        ],
-                        CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: float(
-                            user_input[CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3]
-                        ),
-                        CONF_CHANNEL_DISAGREEMENT_MIN_PCT: float(
-                            user_input[CONF_CHANNEL_DISAGREEMENT_MIN_PCT]
-                        ),
-                    },
-                )
+                return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
             step_id="init",
