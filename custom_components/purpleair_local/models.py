@@ -67,8 +67,9 @@ class ParticleCounts:
 class ChannelReading:
     """One Plantower laser channel's reading.
 
-    Both density estimates are kept because AQI corrections all take
-    `cf_1` as input while the mass entities are reported as `atm`.
+    Both density estimates are kept because most AQI corrections take
+    `cf_1` (EPA extended takes `atm`) while the mass entities are
+    reported as `atm`.
     """
 
     pm1_0_cf_1: float | None
