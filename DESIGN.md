@@ -495,6 +495,19 @@ under "Why the extended correction takes ATM" below.
   `corrected = 0.5 * pm_cf1 - 0.66` (wood-smoke-tuned; under-corrects
   in non-smoke conditions)
 
+The input for AQandU and LRAPA is disputed. PurpleAir's ["Apply
+Conversion" post][pa-conv] writes both on cf_1; [Barkjohn et al.
+2021][barkjohn] (p. 4630) says the PurpleAir map's versions "use these
+raw [cf_atm] data". The two agree below ~30 µg/m³ and diverge in smoke,
+where cf_1 input reads about 50 % higher. We keep cf_1, the more
+cautious reading, until the formulas' owners confirm (asked on the
+PurpleAir forum, October 2026). If ATM is confirmed it would ship as an
+additional option rather than an in-place switch, so existing users'
+history keeps its shape.
+
+[pa-conv]: https://community.purpleair.com/t/the-apply-conversion-field/103
+[barkjohn]: https://doi.org/10.5194/amt-14-4617-2021
+
 If the EPA's correction evolves further, we add it as an additional
 option rather than silently changing what "EPA" means here.
 

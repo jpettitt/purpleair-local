@@ -344,7 +344,15 @@ def _epa_high(pm_atm: float) -> float:
 
 
 def correct_aqandu(pm_cf1: float) -> float:
-    """University of Utah AQandU correction."""
+    """University of Utah AQandU correction.
+
+    The input field is disputed. PurpleAir's "Apply Conversion" post
+    writes this on cf_1; Barkjohn et al. 2021 (p. 4630) says the
+    PurpleAir map applies it to cf_atm. They agree below ~30 µg/m³; in
+    smoke cf_1 input reads ~50 % higher. We keep cf_1, the more cautious
+    reading, until the formula's owners confirm — see DESIGN.md before
+    changing it.
+    """
     corrected = 0.778 * pm_cf1 + 2.65
     return corrected if corrected > 0.0 else 0.0
 
@@ -355,6 +363,8 @@ def correct_lrapa(pm_cf1: float) -> float:
     Published as valid below ~65 µg/m³; we still compute it above that
     and surface it, but consumers should be aware the formula's fit
     degrades at higher concentrations.
+
+    Its input field is disputed the same way as `correct_aqandu`'s.
     """
     corrected = 0.5 * pm_cf1 - 0.66
     return corrected if corrected > 0.0 else 0.0

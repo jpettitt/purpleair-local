@@ -175,6 +175,10 @@ landable on its own.
 
 ## Still open
 
+- **Settle the AQandU / LRAPA input** (cf_1 vs ATM). The sources
+  conflict; asked on the PurpleAir forum in October 2026. If ATM is
+  confirmed, add ATM variants as new options rather than switching in
+  place. See "AQI correction formulas" in DESIGN.md.
 - **Surface upload health as a diagnostic entity** — an
   `uploads_failing` binary sensor, or the `httpsends` minus
   `httpsuccess` delta. That single number explains live-endpoint
