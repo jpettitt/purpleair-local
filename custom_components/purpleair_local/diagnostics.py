@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
@@ -57,12 +57,12 @@ async def async_get_config_entry_diagnostics(
             # The unique_id is the SensorId (MAC) — fully redact rather
             # than retaining structure, since just confirming presence
             # already leaks the fact that a given MAC is registered.
-            "unique_id": "**REDACTED**" if entry.unique_id else None,
+            "unique_id": REDACTED if entry.unique_id else None,
         },
-        "coordinator": _coordinator_health(coordinator),
+        "coordinator": _coordinator_health(coordinator, entry),
         "last_raw_payload": _redact_payload(coordinator.last_raw_payload),
         "live_coordinator": (
-            _coordinator_health(runtime.live)
+            _coordinator_health(runtime.live, entry)
             if runtime.live is not None
             else None
         ),
@@ -75,12 +75,17 @@ async def async_get_config_entry_diagnostics(
 
 
 def _coordinator_health(
-    coordinator: PurpleAirCoordinator,
+    coordinator: PurpleAirCoordinator, entry: ConfigEntry
 ) -> dict[str, Any]:
     return {
         "last_update_success": coordinator.last_update_success,
+        # Error messages name the host, which `entry.data` redacts; HA
+        # also keeps the last one after recovery, so it would leak from
+        # any outage since the last reload.
         "last_exception": (
-            str(coordinator.last_exception)
+            str(coordinator.last_exception).replace(
+                entry.data[CONF_HOST], REDACTED
+            )
             if coordinator.last_exception is not None
             else None
         ),

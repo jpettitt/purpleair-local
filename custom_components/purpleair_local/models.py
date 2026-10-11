@@ -205,17 +205,19 @@ def _parse_channel_optional(
     return _parse_channel(payload, suffix=suffix)
 
 
-# BME680 first, BME280 second. We use `or` semantics carefully so a
-# present-but-None value still falls through to the fallback.
+# BME680 first, BME280 second. A 680 key that is present but unusable
+# (null, NaN) falls through to the 280 key: returning it as-is would
+# drop a valid BME280 reading and, at setup, the entity built from it.
 def _bme_field(
     payload: dict[str, Any], base: str
 ) -> tuple[Any, bool]:
     """Return (value, present) for a BME field, preferring the 680 variant."""
-    if f"{base}_680" in payload:
-        return payload[f"{base}_680"], True
+    value_680 = payload.get(f"{base}_680")
+    if _float_or_none(value_680) is not None:
+        return value_680, True
     if base in payload:
         return payload[base], True
-    return None, False
+    return value_680, f"{base}_680" in payload
 
 
 def _parse_environment(payload: dict[str, Any]) -> Environment | None:

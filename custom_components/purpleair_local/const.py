@@ -32,13 +32,11 @@ DEFAULT_LIVE_SCAN_INTERVAL_S = 15
 # an outage — and an automation watching a live PM entity is worse off
 # seeing `unavailable` than a value a few seconds stale.
 #
-# The tolerance is derived from the poll interval rather than being a
-# fixed count, so the grace period always spans more than this many
-# seconds no matter how fast the user polls (at 15 s that's 5 failures,
-# at 37 s it's 2). 60 s comfortably outlasts one ~30 s block window plus
-# scheduling jitter, while still surfacing a genuinely dead sensor
-# quickly. Only the live coordinator uses this — the averaged one keeps
-# failing fast, since it is the canonical series and backs `online`.
+# Measured from the last real reading, so it holds at any poll interval.
+# 60 s comfortably outlasts one ~30 s block window plus scheduling
+# jitter, while still surfacing a genuinely dead sensor quickly. Only the
+# live coordinator uses this — the averaged one keeps failing fast, since
+# it is the canonical series and backs `online`.
 LIVE_FAILURE_GRACE_S = 60
 
 # Default total timeout for a single HTTP call to the sensor. Healthy

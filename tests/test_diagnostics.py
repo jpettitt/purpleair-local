@@ -127,14 +127,21 @@ async def test_diagnostics_handles_no_payload_yet(hass, outdoor_payload):
 
 
 async def test_diagnostics_surfaces_last_exception(hass, outdoor_payload):
-    err = PurpleAirTimeoutError("timed out talking to host")
+    # The coordinator's real message shape, host included.
+    err = PurpleAirTimeoutError(
+        "could not fetch reading from 192.168.0.42: "
+        "timed out waiting for 192.168.0.42"
+    )
     entry = _register(
         hass, outdoor_payload, last_update_success=False, last_exception=err
     )
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diag["coordinator"]["last_update_success"] is False
-    assert "timed out" in diag["coordinator"]["last_exception"]
+    assert diag["coordinator"]["last_exception"] == (
+        "could not fetch reading from **REDACTED**: "
+        "timed out waiting for **REDACTED**"
+    )
 
 
 async def test_diagnostics_includes_live_coordinator_when_enabled(

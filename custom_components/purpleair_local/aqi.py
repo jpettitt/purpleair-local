@@ -52,6 +52,8 @@ consumers (alerts, dashboards) usually want the underlying number.
 Sources
 -------
 - Barkjohn et al. 2021: doi:10.5194/amt-14-4617-2021
+- Weissert et al. 2025 (the five-piece ATM form, Eqs. 4–8):
+  doi:10.5194/amt-18-3635-2025
 - EPA AirNow Fire & Smoke Map technical approaches:
   https://www.epa.gov/air-sensor-toolbox/technical-approaches-sensor-data-airnow-fire-and-smoke-map
 - AirNow Technical Assistance Document (AQI calculation method):
@@ -96,14 +98,16 @@ _US_EPA_BANDS: tuple[_ColorBand, ...] = (
     _ColorBand(float("inf"), "hazardous", "#7e0023"),
 )
 
-# EU EAQI — European Environment Agency, PM2.5 24-h bands and the
-# official EAQI palette.
+# EU EAQI — European Environment Agency, official EAQI palette. Bands
+# are the 2025 revision's hourly PM2.5 ranges (0–5, 6–15, 16–50, 51–90,
+# 91–140, >140 µg/m³; ETC HE Report 2024/17), which replaced the old
+# 24-h 10/20/25/50/75 table on EEA's live index.
 _EU_EAQI_BANDS: tuple[_ColorBand, ...] = (
-    _ColorBand(10.0, "good", "#50f0e6"),
-    _ColorBand(20.0, "fair", "#50ccaa"),
-    _ColorBand(25.0, "moderate", "#f0e641"),
-    _ColorBand(50.0, "poor", "#ff5050"),
-    _ColorBand(75.0, "very_poor", "#960032"),
+    _ColorBand(5.0, "good", "#50f0e6"),
+    _ColorBand(15.0, "fair", "#50ccaa"),
+    _ColorBand(50.0, "moderate", "#f0e641"),
+    _ColorBand(90.0, "poor", "#ff5050"),
+    _ColorBand(140.0, "very_poor", "#960032"),
     _ColorBand(float("inf"), "extremely_poor", "#7d2181"),
 )
 
@@ -165,7 +169,7 @@ def aqi_band(
         # surfacing as `unknown` on the entity, since a typo in the
         # options shouldn't make the integration look broken.
         bands = _US_EPA_BANDS
-    c = int(pm25_ugm3 * 10) / 10
+    c = _truncate_to_tenth(pm25_ugm3)
     for band in bands:
         if c <= band.pm25_high_ugm3:
             return (band.category, band.color)
@@ -254,11 +258,14 @@ def correct_epa_extended(pm_atm: float, rh_pct: float) -> float:
 
     Barkjohn's team published the extension in two forms: a
     two-piece one on CF=1 (`0.524·x − 0.0862·RH + 5.75` up to x = 343,
-    then `0.46·x + 3.93e-4·x² + 2.97`), and this piecewise one on ATM,
+    then `0.46·x + 3.93e-4·x² + 2.97`), and a piecewise one on ATM,
     offered because most consumers reach PurpleAir through an API that
     exposes only ATM. The slide presenting it is headed "Final
     Correction (cf_atm)" and says outright: "If cf_atm must be used due
-    to API limitations this piecewise equation may be used."
+    to API limitations this piecewise equation may be used." That
+    slide's ATM form switches hard at 50 and 229; this is the five-piece
+    version the AirNow Fire and Smoke Map uses, which blends across
+    30–50 and 210–260 instead (Weissert et al. 2025, Eqs. 4–8).
 
     Outside the 30 → 50 blend band the two are the same curve in
     different units, because a Plantower reports ATM = CF=1 below
@@ -373,6 +380,16 @@ def correct_lrapa(pm_cf1: float) -> float:
 # --- mass → AQI ------------------------------------------------------------
 
 
+def _truncate_to_tenth(pm25_ugm3: float) -> float:
+    """Truncate to one decimal, the EPA convention: 9.07 -> 9.0, not 9.1.
+
+    Rounding x * 10 to 6 places first absorbs float error, which
+    otherwise sends an exact tenth one step low: correct_epa(67.6, 2) is
+    40.99999999999999, and plain truncation made its AQI 114, not 115.
+    """
+    return int(round(pm25_ugm3 * 10, 6)) / 10
+
+
 def pm25_to_aqi(pm25_ugm3: float) -> int:
     """Convert a PM2.5 mass concentration (µg/m³) to integer AQI.
 
@@ -385,10 +402,7 @@ def pm25_to_aqi(pm25_ugm3: float) -> int:
     if pm25_ugm3 < 0:
         return 0
 
-    # Truncate to one decimal (EPA convention). Using int(... * 10) / 10
-    # rather than round() is intentional: 9.07 -> 9.0, not 9.1, so the
-    # measurement maps into the lower band as EPA documents.
-    c = int(pm25_ugm3 * 10) / 10
+    c = _truncate_to_tenth(pm25_ugm3)
 
     for band in _PM25_BANDS:
         if band.pm_lo <= c <= band.pm_hi:

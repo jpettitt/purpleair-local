@@ -33,7 +33,6 @@ def _allow_sockets(socket_enabled):
 def _make_handler(
     payload: dict[str, Any],
     *,
-    fail_first: int = 0,
     delay_first: float | None = None,
     status: int = 200,
     body_override: str | None = None,
@@ -41,8 +40,6 @@ def _make_handler(
 ) -> tuple[Any, dict[str, int]]:
     """Build an aiohttp handler that returns `payload` as JSON-in-text.
 
-    fail_first: drop the connection on the first N calls before responding
-        normally. Used to exercise the client's single retry.
     delay_first: sleep this long on the first call before responding. Used
         to exercise the client's timeout behavior.
     status: HTTP status code to return.
@@ -57,10 +54,6 @@ def _make_handler(
         counters["calls"] += 1
         if request.query.get("live") == "true":
             counters["live_calls"] += 1
-
-        if counters["calls"] <= fail_first:
-            # Hard-drop the connection so the client sees a ClientError.
-            raise web.HTTPException()  # pragma: no cover - replaced below
 
         if delay_first is not None and counters["calls"] == 1:
             await asyncio.sleep(delay_first)
@@ -176,7 +169,9 @@ async def test_non_object_json_raises_invalid_response(aiohttp_server):
             await client.get_reading()
 
 
-async def test_timeout_is_retried_then_raises(aiohttp_server, indoor_payload):
+async def test_timeout_is_retried_and_the_retry_succeeds(
+    aiohttp_server, indoor_payload
+):
     handler, counters = _make_handler(
         indoor_payload, delay_first=0.5
     )
@@ -198,7 +193,10 @@ async def test_timeout_is_retried_then_raises(aiohttp_server, indoor_payload):
 
 async def test_timeout_on_both_attempts_raises(aiohttp_server, indoor_payload):
     # No delay_first cap — every call sleeps long enough to time out.
+    counters = {"calls": 0}
+
     async def handler(_request: web.Request) -> web.Response:
+        counters["calls"] += 1
         await asyncio.sleep(1.0)
         return web.Response(
             text=json.dumps(indoor_payload), content_type="text/html"
@@ -215,6 +213,8 @@ async def test_timeout_on_both_attempts_raises(aiohttp_server, indoor_payload):
         with pytest.raises(PurpleAirTimeoutError):
             await client.get_reading()
 
+    assert counters["calls"] == 2
+
 
 async def test_connection_refused_raises_connection_error():
     # Port 1 is reserved and not listening; aiohttp should raise
@@ -226,8 +226,14 @@ async def test_connection_refused_raises_connection_error():
 
 
 async def test_dropped_connection_is_retried(aiohttp_server, indoor_payload):
+    """Our retry, not aiohttp's.
+
+    aiohttp transparently re-sends a request whose connection drops
+    before a response, so a single drop never reaches our code. Two
+    drops exhaust aiohttp's attempt; the third call is our retry.
+    """
     counters = {"calls": 0}
-    handler = _drop_handler(counters, fail_first=1, payload=indoor_payload)
+    handler = _drop_handler(counters, fail_first=2, payload=indoor_payload)
     app = web.Application()
     app.router.add_get("/json", handler)
     server = await aiohttp_server(app)
@@ -237,7 +243,33 @@ async def test_dropped_connection_is_retried(aiohttp_server, indoor_payload):
         result = await client.get_reading()
 
     assert result["SensorId"] == indoor_payload["SensorId"]
-    assert counters["calls"] == 2
+    assert counters["calls"] == 3
+
+
+async def test_non_utf8_body_still_parses(aiohttp_server, indoor_payload):
+    """One stray byte must not escape the error taxonomy.
+
+    aiohttp decodes a charset-less body as strict UTF-8, so a Latin-1
+    SSID echoed in `ssid` raised UnicodeDecodeError, which the
+    coordinator logged as an unexpected error and the config flow showed
+    as "Unknown error".
+    """
+    body = json.dumps({**indoor_payload, "ssid": "CAFE"}).encode()
+    body = body.replace(b"CAFE", b"Caf\xe9")
+
+    async def handler(_request: web.Request) -> web.Response:
+        return web.Response(body=body, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/json", handler)
+    server = await aiohttp_server(app)
+
+    async with aiohttp.ClientSession() as session:
+        client = PurpleAirClient(f"127.0.0.1:{server.port}", session)
+        result = await client.get_reading()
+
+    assert result["SensorId"] == indoor_payload["SensorId"]
+    assert result["ssid"] == "Caf\ufffd"
 
 
 # --- live requests are not retried ----------------------------------------

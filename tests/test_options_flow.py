@@ -202,6 +202,8 @@ async def test_options_save_without_host_change_skips_probe(
         CONF_CHANNEL_DISAGREEMENT_MIN_DIFF_UGM3: 7.5,
         CONF_CHANNEL_DISAGREEMENT_MIN_PCT: 60.0,
     }
+    # `==` can't tell 30 from 30.0, so pin the flow's int() coercion.
+    assert isinstance(entry.options[CONF_SCAN_INTERVAL_S], int)
     # Host (which lives in data) is untouched.
     assert entry.data[CONF_HOST] == _HOST
 

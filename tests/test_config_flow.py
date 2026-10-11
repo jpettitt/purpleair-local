@@ -198,6 +198,12 @@ async def test_duplicate_sensor_aborts_and_updates_host(
         ("HTTPS://192.168.1.42/", "192.168.1.42"),
         ("192.168.1.42/", "192.168.1.42"),
         ("purpleair.lan", "purpleair.lan"),
+        # PurpleAir documents the local URL as http://<ip>/json; the
+        # client appends /json itself, so keeping it requested /json/json.
+        ("http://192.168.1.42/json", "192.168.1.42"),
+        ("192.168.1.42/JSON/", "192.168.1.42"),
+        ("http://192.168.1.42/json?live=true", "192.168.1.42"),
+        ("proxy.lan/purpleair", "proxy.lan/purpleair"),
     ],
 )
 def test_normalize_host(raw, expected):

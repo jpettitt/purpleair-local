@@ -175,6 +175,17 @@ landable on its own.
 
 ## Still open
 
+- **Design follow-ups from the October 2026 review**, each needing a
+  decision before code:
+  - The device name ignores the entry title ("PurpleAir 0002", not
+    "Outdoor 0002"), so README's `sensor.outdoor_0119_*` examples don't
+    match a fresh install's entity_ids.
+  - Options that remove entities (live off, a correction deselected)
+    leave them in the registry as `unavailable` until deleted by hand.
+  - The live primary's lower-channel fallback uses live A/B samples
+    while `channel_disagreement` uses averaged data, so the two can
+    disagree.
+  - Particle-count entity_ids slugify "μm" to "mm" (`…_particles_0_3mm`).
 - **Settle the AQandU / LRAPA input** (cf_1 vs ATM). The sources
   conflict; asked on the PurpleAir forum in October 2026. If ATM is
   confirmed, add ATM variants as new options rather than switching in

@@ -204,16 +204,29 @@ def test_aqi_epa_uses_cf1_and_humidity():
     )
 
 
-def test_aqi_epa_without_environment_is_none():
-    """EPA correction needs RH; no BME → no humidity → entity reports None."""
+def test_aqi_epa_entities_are_not_created_without_humidity():
+    """The EPA corrections need RH; no BME means nothing to correct.
+
+    They used to be created anyway and report `unknown` forever, against
+    the "no stub entities" rule every other field follows.
+    """
     payload = _dual_payload(pm25_a=10.0, pm25_b=20.0, include_bme=False)
     coord = _coordinator(payload)
-    by_id = _by_unique_id(build_entities(coord, options={}))
+    options = {
+        CONF_AQI_CORRECTIONS: [
+            AQI_CORRECTION_RAW,
+            AQI_CORRECTION_EPA,
+            AQI_CORRECTION_EPA_EXTENDED,
+            AQI_CORRECTION_AQANDU,
+        ]
+    }
+    by_id = _by_unique_id(build_entities(coord, options=options))
     sid = payload["SensorId"]
-    # No env entities created at all
+
     assert not any(e.unique_id.startswith(f"{sid}_env_") for e in by_id.values())
-    # But EPA AQI is created with no value
-    assert by_id[f"{sid}_primary_aqi_epa"].native_value is None
+    assert not any("_aqi_epa" in uid for uid in by_id)
+    assert f"{sid}_primary_aqi_raw" in by_id
+    assert f"{sid}_primary_aqi_aqandu" in by_id
 
 
 # --- particle counts ------------------------------------------------------
@@ -336,38 +349,32 @@ def test_aqi_entity_uses_selected_color_scheme():
 def test_aqi_entity_attribute_for_epa_correction_uses_corrected_value():
     """The category/color should reflect the CORRECTED PM, not the raw.
 
-    EPA correction at low humidity + 0 PM yields ~5.75 µg/m³ → still 'good'
-    in US EPA, but the colour comes from the EPA-corrected value (5.75),
-    not from the raw ATM (0.0). If the corrected value crosses a band
-    boundary, the colour follows.
+    The two inputs are chosen to land in different US bands, so an
+    attribute computed from the wrong one fails here.
     """
-    # cf1 = 50, rh = 30 → epa-corrected = 0.524*50 - 0.0862*30 + 5.75 = 29.364
-    # That truncates to 29.3 µg/m³ → US EPA "moderate"
-    payload = _dual_payload(pm25_a=33.333, pm25_b=33.333)
-    # cf1 = atm * 1.5 in _dual_payload, so cf1 = 50, atm = 33.333.
-    # Override humidity to 30 by rebuilding env:
-    payload["current_humidity"] = 30.0
+    # atm = 40 → raw "unhealthy_for_sensitive_groups" (35.5-55.4).
+    # cf1 = 60 (1.5 × atm in _dual_payload), rh = 30 →
+    # epa = 0.524*60 - 0.0862*30 + 5.75 = 34.604 → "moderate".
+    payload = _dual_payload(pm25_a=40.0, pm25_b=40.0, rh=30.0)
     coord = _coordinator(payload)
     by_id = _by_unique_id(build_entities(coord, options={}))
     sid = payload["SensorId"]
-    # Raw uses ATM 33.333 → US EPA "moderate"
+
     raw_attrs = by_id[f"{sid}_a_aqi_raw"].extra_state_attributes
-    assert raw_attrs["category"] == "moderate"
-    # EPA-corrected (29.364) is ALSO moderate; same band, different
-    # input. The point is they're computed from their respective
-    # corrected values, not aliased.
     epa_attrs = by_id[f"{sid}_a_aqi_epa"].extra_state_attributes
+    assert raw_attrs["category"] == "unhealthy_for_sensitive_groups"
     assert epa_attrs["category"] == "moderate"
 
 
 def test_aqi_entity_attributes_none_when_input_missing():
-    """No BME → no humidity → EPA AQI is unknown → no attributes."""
-    payload = _dual_payload(
-        pm25_a=10.0, pm25_b=10.0, include_bme=False
-    )
+    """Humidity gone on a later poll → EPA AQI unknown → no attributes."""
+    payload = _dual_payload(pm25_a=10.0, pm25_b=10.0)
     coord = _coordinator(payload)
     by_id = _by_unique_id(build_entities(coord, options={}))
     sid = payload["SensorId"]
+    coord.data = SensorReading.from_payload(
+        _dual_payload(pm25_a=10.0, pm25_b=10.0, include_bme=False)
+    )
     # EPA needs humidity, which we just dropped
     assert by_id[f"{sid}_a_aqi_epa"].native_value is None
     assert by_id[f"{sid}_a_aqi_epa"].extra_state_attributes is None
@@ -744,13 +751,17 @@ def test_epa_extended_diverges_from_epa_in_heavy_smoke():
 
 
 def test_epa_extended_without_humidity_is_none():
-    """Like `epa`, it needs RH; no BME means no input to correct."""
-    payload = _dual_payload(pm25_a=10.0, pm25_b=20.0, include_bme=False)
+    """Like `epa`, it needs RH; humidity gone on a later poll → unknown."""
+    payload = _dual_payload(pm25_a=10.0, pm25_b=20.0)
+    coord = _coordinator(payload)
     by_id = _by_unique_id(
         build_entities(
-            _coordinator(payload),
+            coord,
             options={CONF_AQI_CORRECTIONS: [AQI_CORRECTION_EPA_EXTENDED]},
         )
+    )
+    coord.data = SensorReading.from_payload(
+        _dual_payload(pm25_a=10.0, pm25_b=20.0, include_bme=False)
     )
     sid = payload["SensorId"]
     assert by_id[f"{sid}_primary_aqi_epa_extended"].native_value is None

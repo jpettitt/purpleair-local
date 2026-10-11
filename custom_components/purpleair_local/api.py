@@ -171,8 +171,11 @@ class PurpleAirClient:
                     )
                 # Some firmware sends Content-Type: text/html for /json,
                 # so we read as text and parse manually rather than trusting
-                # resp.json()'s content-type check.
-                body = await resp.text()
+                # resp.json()'s content-type check. errors="replace":
+                # aiohttp decodes a charset-less body as strict UTF-8, and
+                # one stray byte (a Latin-1 SSID echoed in `ssid`) would
+                # otherwise escape our error taxonomy as UnicodeDecodeError.
+                body = await resp.text(errors="replace")
         except asyncio.TimeoutError as err:
             raise PurpleAirTimeoutError(
                 f"timed out waiting for {self._host}"
