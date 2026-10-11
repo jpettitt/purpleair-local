@@ -173,6 +173,13 @@ landable on its own.
   equivalence to the published CF=1 two-piece form. See "Why the
   extended correction takes ATM" in DESIGN.md._
 
+## Before releasing v0.3.0 final
+
+- Remove the beta callout at the top of "What it provides" in
+  [README.md](README.md) once v0.3.0 ships as a normal release — it
+  points users at HACS _Show beta versions_, which is wrong the moment
+  the stable tag exists.
+
 ## Still open
 
 - **Design follow-ups from the October 2026 review**, each needing a
