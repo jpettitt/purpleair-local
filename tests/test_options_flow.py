@@ -71,6 +71,18 @@ def _patch_client(*, payload: dict | None = None, side_effect: Any = None):
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_entry_setup():
+    """These tests cover the flow alone, but saving changed options now
+    schedules a reload (OptionsFlowWithReload) that would run a real
+    setup and poll. Reloads are covered in test_reload.py."""
+    with patch(
+        "custom_components.purpleair_local.async_setup_entry",
+        AsyncMock(return_value=True),
+    ):
+        yield
+
+
 def _entry(hass, indoor_payload, *, options: dict | None = None) -> MockConfigEntry:
     """Create and register a config entry that matches the indoor fixture."""
     entry = MockConfigEntry(
