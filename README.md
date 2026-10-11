@@ -26,6 +26,13 @@ the implementation.
 
 ## What it provides
 
+> **v0.3.0 is in beta.** The EPA extended correction, the EEA's 2025
+> EU EAQI bands, and `online` reading `off` (not `unavailable`) after a
+> failed poll ship in v0.3.0; `v0.2.0` is the stable release. To try
+> them, turn on *Show beta versions* in HACS (⋮ on the PurpleAir Local
+> entry → Redownload → toggle it), pick a `0.3.0bN` release, and restart
+> Home Assistant. The beta needs Home Assistant 2025.8 or later.
+
 Per configured sensor:
 
 - **PM1.0 / PM2.5 / PM10 mass concentration** (µg/m³, ATM density) —
