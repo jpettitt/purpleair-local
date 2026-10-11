@@ -72,8 +72,12 @@ def test_online_is_true_when_last_update_succeeded(indoor_payload):
 
 
 def test_online_is_false_when_last_update_failed(indoor_payload):
+    """`is_on` alone isn't enough: the state is `off` only while the entity
+    stays available. test_init.py checks the real state."""
     coord = _coordinator(indoor_payload, last_update_success=False)
-    assert _OnlineBinarySensor(coord).is_on is False
+    entity = _OnlineBinarySensor(coord)
+    assert entity.available is True
+    assert entity.is_on is False
 
 
 # --- Channel-disagreement value math --------------------------------------
@@ -90,8 +94,11 @@ def test_online_is_false_when_last_update_failed(indoor_payload):
         (5.0, 50.0, True),  # diff 45, rel 90%, both
         (1.0, 4.0, False),  # diff 3, rel 75%, only rel
         (10.0, 100.0, True),  # diff 90, rel 90%, both
-        # Exactly at thresholds — inclusive.
-        (5.0, 16.7, True),  # diff 11.7, max 16.7, rel ~70.1%, ≥ both
+        # Exactly at each threshold — both are inclusive.
+        (0.0, 5.0, True),  # diff exactly 5, rel 100%
+        (0.0, 4.9, False),  # diff 4.9, just under
+        (3.0, 10.0, True),  # diff 7, rel exactly 70%
+        (3.1, 10.0, False),  # rel 69%, just under
     ],
 )
 def test_channel_disagreement_threshold_logic(a, b, expected):

@@ -179,6 +179,25 @@ def test_bme680_fields_preferred_over_bme280():
     assert r.environment.voc_resistance == 12345.0
 
 
+@pytest.mark.parametrize("unusable", [None, float("nan")])
+def test_unusable_bme680_value_falls_back_to_bme280(unusable: float | None):
+    """Only a usable 680 reading wins; otherwise the 280 one is kept."""
+    payload = _minimal_payload(
+        {
+            "pm2_5_atm": 0.0,
+            "current_temp_f": 70.0,
+            "current_temp_f_680": unusable,
+            "current_humidity": 40.0,
+            "current_humidity_680": unusable,
+        },
+        drop_env=True,
+    )
+    r = SensorReading.from_payload(payload)
+    assert r.environment is not None
+    assert r.environment.temp_f == 70.0
+    assert r.environment.humidity_pct == 40.0
+
+
 def test_gas_680_nan_becomes_none():
     payload = _minimal_payload(
         {"pm2_5_atm": 0.0, "current_temp_f": 70.0, "gas_680": float("nan")},

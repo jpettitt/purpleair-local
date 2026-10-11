@@ -70,8 +70,8 @@ places that the parser must handle:
 | (not listed) | `status_7` | Undocumented; treat like other `status_*`. |
 
 The parser treats the docs as a superset of expected fields and the
-firmware as authoritative. New unknown keys are logged at debug level and
-ignored.
+firmware as authoritative. Unknown keys are ignored (not logged); the
+diagnostics download carries the raw payload when one matters.
 
 ### Fields we care about
 
@@ -176,7 +176,9 @@ Implementation:
   and ripple through every entity value accessor for no user-visible gain.
 - Only the averaged coordinator gates setup (`ConfigEntryNotReady`) and
   backs the `online` binary sensor. A live-endpoint failure must not blank
-  the averaged entities.
+  the averaged entities. If the first live poll fails, the live entities
+  are built from the averaged reading (same hardware, same fields) and
+  stay `unavailable` until a live poll succeeds.
 - **Live is a subset**: PM mass, AQI and particle counts only, primary
   channel only. Environment and diagnostic fields are returned identically
   on both endpoints, so twins of those would be duplicates; per-channel
@@ -309,13 +311,15 @@ So the integration treats the window as something to *survive*:
    An immediate retry lands in the same block window, doubling a 10 s
    stall to 20 s and putting a second request on a sensor that is
    already refusing to answer. The averaged endpoint keeps its retry.
-2. **The live coordinator rides out consecutive transient failures**,
-   serving the previous reading rather than dropping entities to
-   `unavailable`. The allowance is derived from the poll interval so the
-   grace period always exceeds `LIVE_FAILURE_GRACE_S` (60 s) — long
-   enough to outlast a block window plus jitter, short enough to surface
-   a genuinely dead sensor. Invalid responses are *not* ridden out;
-   those are persistent, not transient.
+2. **The live coordinator rides out transient failures**, serving the
+   previous reading rather than dropping entities to `unavailable`, for
+   up to `LIVE_FAILURE_GRACE_S` (60 s) after the last real reading —
+   long enough to outlast a block window plus jitter, short enough to
+   surface a genuinely dead sensor. It is timed, not counted: each
+   timed-out poll costs its interval plus the request timeout, so a
+   count overshot to ~150 s. Invalid responses are *not* ridden out;
+   those are persistent, not transient, and once one has failed an
+   update the old reading is never served again.
 
 Neither is a workaround for a bug on our side — the delay is the
 sensor's own blocking upload. What we control is not amplifying it and
@@ -387,7 +391,8 @@ The corrections consume `pm2_5_cf_1` (EPA extended: `pm2_5_atm`) plus
 relative humidity; we hold the formulas in `aqi.py` as pure functions and
 unit-test them against published worked examples.
 
-**Particle counts** (per channel, hidden by default — useful but noisy):
+**Particle counts** (primary channel only, hidden by default — useful
+but noisy):
 `p_0_3_um`, `p_0_5_um`, `p_1_0_um`, `p_2_5_um`, `p_5_0_um`, `p_10_0_um`.
 
 **Environment** (only if the BME is present):
@@ -401,7 +406,9 @@ noisy ones):
 
 **Binary sensors:**
 - `channel_disagreement` — see below.
-- `online` — true while the coordinator's last update succeeded.
+- `online` — true while the coordinator's last update succeeded, false
+  after a failed one. It never goes `unavailable` itself: reporting the
+  outage is its job.
 
 ### Channel disagreement
 
@@ -463,6 +470,10 @@ Runtime behavior:
 - IP changes (DHCP) → user edits Host in the options flow (preferred), or
   re-runs the config flow. Matching `SensorId` rebinds to the existing
   entry; mismatch is rejected.
+- Another PurpleAir takes over the address → every poll checks the
+  payload's `SensorId` against the entry, and a mismatch fails the update
+  (entities `unavailable`, setup retried) rather than serving the other
+  sensor's data.
 
 ## AQI correction formulas
 
@@ -518,15 +529,21 @@ takes ATM. This looks like a bug and has already been written as one
 once, so the reasoning is recorded here.
 
 Barkjohn's team published the extension in **two forms**
-([EPA webinar, May 2021][ext-deck]):
+([EPA webinar, May 2021][ext-deck]): a two-piece one on CF=1, and a
+three-piece one on ATM that switches hard at 50 and 229. The AirNow
+Fire and Smoke Map uses a five-piece version of the ATM form, which
+blends across 30–50 and 210–260 instead of switching and has a constant
+of 2.966; [Weissert et al. 2025][moma] give it as Eqs. 4–8, with cf_atm
+as the input. That five-piece form is what `correct_epa_extended`
+implements.
 
 | | CF=1 form | ATM form |
 | --- | --- | --- |
 | linear slope | 0.524 | 0.786 |
 | high slope | 0.46 | 0.69 |
 | quadratic | 3.93e-4 | 8.84e-4 |
-| constant | 2.97 | 2.966 |
-| breakpoint | 343 | 229 |
+| constant | 2.97 | 2.97 (five-piece: 2.966) |
+| breakpoint | 343 | 229 (five-piece: 210–260 blend) |
 
 The slide carrying the ATM form is headed "Final Correction (cf_atm)"
 and states: *"The PurpleAir US-wide & extended corrections were
@@ -598,6 +615,7 @@ CF=1 two-piece's 39.38).
 
 [ext-deck]: https://www.epa.gov/sites/default/files/2021-05/documents/toolsresourceswebinar_purpleairsmoke_210519b.pdf
 [corr]: https://doi.org/10.3390/s24247871
+[moma]: https://doi.org/10.5194/amt-18-3635-2025
 [ag-pms]: https://github.com/airgradienthq/arduino/blob/3.7.0/src/PMS/PMS.cpp
 [ag-value]: https://github.com/airgradienthq/arduino/blob/3.7.0/src/AgValue.cpp
 
@@ -626,8 +644,8 @@ automations.
 ## Testing
 
 - **Unit tests** for `aqi.py` against published worked examples for each
-  formula, plus breakpoint table boundary cases (0, 12, 35.4, 55.4,
-  150.4, 250.4, 350.4, 500.4 µg/m³).
+  formula, plus the 2024 breakpoint table's boundary cases (0, 9.0,
+  35.4, 55.4, 125.4, 225.4, 325.4 µg/m³).
 - **Snapshot tests** for the parser using captured `/json` payloads from
   the user's real indoor and outdoor sensors (committed under
   `tests/fixtures/`, with `SensorId`, `lat`, `lon`, `ssid` redacted).

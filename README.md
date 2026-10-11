@@ -30,13 +30,16 @@ Per configured sensor:
 
 - **PM1.0 / PM2.5 / PM10 mass concentration** (µg/m³, ATM density) —
   always a primary entity; channel A and channel B added on dual-laser
-  units. Primary on dual is the simple A/B average for v0.1.
+  units. Primary on dual is the A/B average, or the lower channel when
+  the two disagree (see the channel-disagreement sensor).
 - **PM2.5 AQI** — one entity per enabled correction, using the
   2024-revised US EPA breakpoint table. Default: raw (no concentration
   correction) and EPA (Barkjohn 2021). Also available via the options
   flow: EPA extended (the five-piece version used by the AirNow Fire
   and Smoke Map, which stays accurate in heavy smoke where the linear
-  form under-reports), AQandU, and LRAPA.
+  form under-reports), AQandU, and LRAPA. Both EPA corrections need
+  the sensor's humidity reading, so a sensor without one doesn't get
+  them.
 - **Temperature, humidity, dewpoint, pressure** — only when the sensor
   has a BME280 or BME680. BME680 values preferred when both are present.
   Note: the temperature reading runs a few degrees high. The BME sits
@@ -171,7 +174,8 @@ templates can read:
 - `category_color` — the official hex colour for that band.
 
 The colour scheme is per-user, selected in the integration's options
-flow. Default is US EPA (AirNow); EU EAQI and UK DAQI are available.
+flow. Default is US EPA (AirNow); EU EAQI (the EEA's 2025 hourly PM2.5
+bands) and UK DAQI are available.
 
 ### Mushroom — icon coloured by AQI
 

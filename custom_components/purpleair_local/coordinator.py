@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -31,6 +31,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.util import dt as dt_util
 
 from .api import (
     PurpleAirClient,
@@ -68,15 +69,11 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
         )
         self.client = client
         self.live = live
-        # How many consecutive transient failures the live coordinator
-        # rides out before giving up and marking the update failed. Sized
-        # so the grace period always exceeds LIVE_FAILURE_GRACE_S: at a
-        # 15 s interval that's 5 polls (75 s), at 37 s it's 2 (74 s).
-        # Zero for the averaged coordinator — it fails fast.
-        self.max_consecutive_failures = (
-            (LIVE_FAILURE_GRACE_S // scan_interval_s) + 1 if live else 0
-        )
-        self._consecutive_failures = 0
+        # When the last real reading arrived. Timed rather than counted
+        # because each timed-out poll costs its interval *plus* the
+        # request timeout, so a failure count overshot the grace period
+        # (~150 s instead of 60 at the defaults).
+        self._last_reading_at: datetime | None = None
         # Kept around between polls so the diagnostics download can
         # include the exact bytes the sensor returned, not just the
         # parsed dataclass — useful when a bug report concerns a
@@ -90,21 +87,14 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
         except (PurpleAirConnectionError, PurpleAirTimeoutError) as err:
             # Transient by nature, and on the live endpoint frequently
             # just the sensor's periodic block window rather than a
-            # fault. Serve the previous reading until the grace period
-            # is exhausted so entities don't flap to `unavailable`
-            # mid-automation. Requires a previous reading to serve;
-            # without one there is nothing to fall back to.
-            self._consecutive_failures += 1
-            if (
-                self._consecutive_failures <= self.max_consecutive_failures
-                and self.data is not None
-            ):
+            # fault. Serve the previous reading for up to
+            # LIVE_FAILURE_GRACE_S so entities don't flap to
+            # `unavailable` mid-automation.
+            if self._within_grace():
                 _LOGGER.debug(
-                    "purpleair %s: transient failure %d of %d, serving the "
+                    "purpleair %s: transient failure, serving the "
                     "previous reading: %s",
                     self.name,
-                    self._consecutive_failures,
-                    self.max_consecutive_failures,
                     err,
                 )
                 return self.data
@@ -114,7 +104,6 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
         except PurpleAirError as err:
             # Invalid response — a persistent state (wrong host, sensor
             # in a weird mode), so no point riding it out.
-            self._consecutive_failures += 1
             raise UpdateFailed(
                 f"could not fetch reading from {self.client.host}: {err}"
             ) from err
@@ -127,19 +116,43 @@ class PurpleAirCoordinator(DataUpdateCoordinator[SensorReading]):
             raise UpdateFailed(
                 f"malformed payload from {self.client.host}: {err}"
             ) from err
-        self._consecutive_failures = 0
+        expected = self.config_entry.unique_id if self.config_entry else None
+        if expected is not None and reading.sensor_id != expected:
+            # DHCP can hand this address to another PurpleAir. Its data
+            # under this entry would be silently wrong, and the setup
+            # path would register entities against its MAC.
+            raise UpdateFailed(
+                f"{self.client.host} now answers as a different PurpleAir "
+                "sensor; update this entry's host in its options"
+            )
+        self._last_reading_at = dt_util.utcnow()
         self.last_raw_payload = payload
         return reading
+
+    def _within_grace(self) -> bool:
+        """Whether a transient failure may serve the previous reading.
+
+        Live only — the averaged coordinator is the canonical series and
+        backs `online`, so it fails fast. Only while the last update
+        succeeded: after an invalid response or a sensor mismatch the
+        reading on hand predates a real failure and must not come back.
+        """
+        return (
+            self.live
+            and self.last_update_success
+            and self.data is not None
+            and self._last_reading_at is not None
+            and dt_util.utcnow() - self._last_reading_at
+            <= timedelta(seconds=LIVE_FAILURE_GRACE_S)
+        )
 
 
 @dataclass(slots=True)
 class PurpleAirRuntime:
     """Everything one config entry owns, stored in `hass.data`.
 
-    `live` is None unless the user enabled live entities — and also
-    when the live coordinator's first poll failed, since entity
-    construction reads `coordinator.data`. Averaged is never None: its
-    first refresh gates entry setup.
+    `live` is None unless the user enabled live entities. Averaged is
+    never None: its first refresh gates entry setup.
     """
 
     averaged: PurpleAirCoordinator

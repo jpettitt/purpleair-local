@@ -76,19 +76,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # a live-endpoint failure must not raise ConfigEntryNotReady and
         # take the averaged entities down with it.
         await live_coordinator.async_refresh()
-        if live_coordinator.last_update_success:
-            runtime.live = live_coordinator
-        else:
-            # Entity construction reads coordinator.data, so there is
-            # nothing to build from. Averaged entities still set up; the
-            # live set appears on the next reload or restart.
-            _LOGGER.warning(
-                "purpleair %s: live entities enabled but the first "
-                "?live=true poll failed (%s); skipping live entities "
-                "until the next reload",
+        if not live_coordinator.last_update_success:
+            # Entity construction reads coordinator.data, so seed it with
+            # the averaged reading — same hardware, same fields. The
+            # failed update keeps the live entities `unavailable` until a
+            # real live poll lands; the entities' listeners keep polling.
+            live_coordinator.data = coordinator.data
+            _LOGGER.debug(
+                "purpleair %s: first ?live=true poll failed (%s); live "
+                "entities start unavailable",
                 entry.data[CONF_HOST],
                 live_coordinator.last_exception,
             )
+        runtime.live = live_coordinator
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
 

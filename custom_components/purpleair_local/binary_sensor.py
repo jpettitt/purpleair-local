@@ -50,6 +50,13 @@ class _OnlineBinarySensor(PurpleAirEntity, BinarySensorEntity):
         self._attr_name = "Online"
 
     @property
+    def available(self) -> bool:
+        # Reporting connectivity is this entity's job, so a failed poll
+        # must read `off`; inheriting the coordinator's availability
+        # turned it `unavailable` instead, and `to: off` never fired.
+        return True
+
+    @property
     def is_on(self) -> bool:
         return self.coordinator.last_update_success
 

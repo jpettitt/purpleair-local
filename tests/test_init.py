@@ -15,7 +15,13 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import CONF_HOST
+from homeassistant.const import (
+    CONF_HOST,
+    STATE_OFF,
+    STATE_ON,
+    STATE_UNAVAILABLE,
+)
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.purpleair_local.api import PurpleAirTimeoutError
@@ -128,9 +134,9 @@ async def test_live_coordinator_uses_default_interval_when_unset(
 async def test_live_poll_failure_does_not_block_setup(hass, indoor_payload):
     """A dead live endpoint must not take the averaged entities down.
 
-    Averaged succeeds, live fails: setup still returns True and the
-    entry loads. Live is left None because entity construction reads
-    `coordinator.data`, so there'd be nothing to build from.
+    Averaged succeeds, live fails: setup still returns True, and the live
+    coordinator is kept, seeded from the averaged reading, so its
+    entities exist and recover on their own.
     """
     entry = _entry(hass, indoor_payload, options={CONF_LIVE_ENTITIES: True})
 
@@ -141,4 +147,61 @@ async def test_live_poll_failure_does_not_block_setup(hass, indoor_payload):
 
     runtime = hass.data[DOMAIN][entry.entry_id]
     assert runtime.averaged.last_update_success is True
-    assert runtime.live is None
+    assert runtime.live is not None
+    assert runtime.live.last_update_success is False
+
+
+def _entity_ids(hass, entry, unique_id_suffix: str) -> list[str]:
+    """Enabled entities of `entry` whose unique_id ends with the suffix."""
+    registry = er.async_get(hass)
+    return [
+        e.entity_id
+        for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if e.unique_id.endswith(unique_id_suffix) and e.disabled_by is None
+    ]
+
+
+async def test_live_entities_start_unavailable_and_recover(
+    hass, indoor_payload
+):
+    """They used to be skipped until the next reload or restart."""
+    entry = _entry(hass, indoor_payload, options={CONF_LIVE_ENTITIES: True})
+
+    with _patch_client(
+        side_effect=[
+            indoor_payload,
+            PurpleAirTimeoutError("live timed out"),
+            indoor_payload,
+        ]
+    ):
+        assert await _setup(hass, entry) is True
+        live_ids = _entity_ids(hass, entry, "_live")
+        assert live_ids
+        assert {hass.states.get(e).state for e in live_ids} == {
+            STATE_UNAVAILABLE
+        }
+
+        await hass.data[DOMAIN][entry.entry_id].live.async_refresh()
+        await hass.async_block_till_done()
+
+    states = {hass.states.get(e).state for e in live_ids}
+    assert STATE_UNAVAILABLE not in states
+
+
+async def test_online_reads_off_not_unavailable_when_a_poll_fails(
+    hass, indoor_payload
+):
+    """`to: off` automations must fire; `unavailable` never matched them."""
+    entry = _entry(hass, indoor_payload)
+
+    with _patch_client(
+        side_effect=[indoor_payload, PurpleAirTimeoutError("down")]
+    ):
+        assert await _setup(hass, entry) is True
+        (online,) = _entity_ids(hass, entry, "_diag_online")
+        assert hass.states.get(online).state == STATE_ON
+
+        await hass.data[DOMAIN][entry.entry_id].averaged.async_refresh()
+        await hass.async_block_till_done()
+
+    assert hass.states.get(online).state == STATE_OFF

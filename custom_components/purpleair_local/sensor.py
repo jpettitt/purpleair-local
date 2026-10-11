@@ -4,12 +4,13 @@ Entity layout (per configured sensor):
 
   PM mass concentration (µg/m³, ATM):
     - "PM1.0", "PM2.5", "PM10" — primary (single ch: = channel A;
-      dual ch: simple average of A + B)
+      dual ch: average of A + B, or the lower one when they disagree)
     - "PM1.0 channel A/B", … — only created on dual-laser units
 
   PM2.5 AQI:
     - One entity per correction enabled in options (default: raw + EPA;
-      AQandU and LRAPA available). Per-channel variants on dual.
+      EPA extended, AQandU and LRAPA available). Per-channel variants on
+      dual. The EPA ones need humidity, so a sensor without it gets none.
 
   Particle counts (per dL, six size bins):
     - Primary only, all disabled by default. Noisy but useful for
@@ -31,11 +32,11 @@ Entity layout (per configured sensor):
 
 Design choices worth knowing
 ----------------------------
-Primary value for dual-channel sensors is the simple A/B average for
-v0.1. If the channel-disagreement binary sensor (built in a later
-step) flips on, the primary is suspect — the user can react via
-automation. A smarter "fall back to the healthy channel" path is in
-the design doc but out of scope here.
+Primary value for dual-channel sensors is the A/B average, except when
+the channels disagree (the same `channels_disagree()` rule the binary
+sensor uses): then it falls back to the lower channel, since a failing
+laser almost always reads high. DESIGN.md's "Channel disagreement"
+section has the rationale.
 
 We construct the entity list once at setup time based on what the
 first coordinator refresh returned. Fields that *appear* later won't
@@ -274,6 +275,10 @@ class _PmMassEntity(PurpleAirEntity, SensorEntity):
 # AQI entities
 # ---------------------------------------------------------------------------
 
+_CORRECTIONS_NEEDING_RH = frozenset(
+    {AQI_CORRECTION_EPA, AQI_CORRECTION_EPA_EXTENDED}
+)
+
 _AQI_LABELS: dict[str, str] = {
     AQI_CORRECTION_RAW: "AQI (raw)",
     AQI_CORRECTION_EPA: "AQI (EPA)",
@@ -299,9 +304,9 @@ def _aqi_corrected_pm(
       the correction was published against the ATM density.
     - `aqandu` / `lrapa` / `epa`: the channel's `pm2_5_cf_1` fed
       through the respective correction formula. EPA additionally
-      needs relative humidity; if no BME is present the entity has
-      no input to correct and we return None (the entity reports
-      `unknown`).
+      needs relative humidity: its entities exist only when the sensor
+      reported humidity at setup, and a later poll without it returns
+      None (the entity reports `unknown`).
 
     Returning the µg/m³ intermediate (rather than going straight to
     the AQI integer) lets `extra_state_attributes` share the same
@@ -702,10 +707,20 @@ def build_entities(
                 )
             )
 
-    # AQI per enabled correction
-    enabled_corrections: list[str] = list(
-        options.get(CONF_AQI_CORRECTIONS, DEFAULT_AQI_CORRECTIONS)
+    # AQI per enabled correction. The EPA ones need relative humidity,
+    # and like any other field, one absent at setup means no entity
+    # rather than a stub that reports `unknown` forever.
+    has_rh = (
+        reading.environment is not None
+        and reading.environment.humidity_pct is not None
     )
+    enabled_corrections: list[str] = [
+        correction
+        for correction in options.get(
+            CONF_AQI_CORRECTIONS, DEFAULT_AQI_CORRECTIONS
+        )
+        if has_rh or correction not in _CORRECTIONS_NEEDING_RH
+    ]
     for channel in channels:
         for correction in enabled_corrections:
             entities.append(

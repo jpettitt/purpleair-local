@@ -8,11 +8,12 @@ Two regression checks:
      UI renders the en.json values, so a fix to strings.json that
      forgets to update en.json ships as a no-op until someone notices.
 
-  2. Every `errors["base"] = "X"` and every abort reason referenced in
-     config_flow.py has a matching entry in strings.json. Adding a new
-     error key without a string lets the UI fall back to the raw key
-     ("invalid_response_v2") which looks awful and is easy to miss in
-     a manual smoke test.
+  2. Every `errors["base"] = "X"` in config_flow.py, and the
+     `already_configured` abort its unique-ID check raises (the flow has
+     no other abort reasons), has a matching entry in strings.json.
+     Adding a new error key without a string lets the UI fall back to
+     the raw key ("invalid_response_v2") which looks awful and is easy
+     to miss in a manual smoke test.
 """
 
 from __future__ import annotations

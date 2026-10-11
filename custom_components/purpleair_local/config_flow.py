@@ -156,7 +156,7 @@ async def _probe(hass: HomeAssistant, host: str) -> SensorReading:
 
 
 def _normalize_host(raw: str) -> str:
-    """Strip whitespace, scheme, and trailing slashes a user might paste.
+    """Strip whitespace, scheme, `/json` and trailing slashes from a paste.
 
     Users commonly paste the URL from their browser ("http://192.168.1.42/")
     rather than the bare host. Be forgiving so they don't get a
@@ -167,6 +167,12 @@ def _normalize_host(raw: str) -> str:
         if host.lower().startswith(scheme):
             host = host[len(scheme) :]
             break
+    host = host.split("?", 1)[0].rstrip("/")
+    # The documented local URL is http://<ip>/json, and the client adds
+    # /json itself. Only that suffix goes: any other path is kept, since
+    # a reverse-proxy prefix ("proxy.lan/purpleair") works today.
+    if host.lower().endswith("/json"):
+        host = host[: -len("/json")]
     return host.rstrip("/")
 
 

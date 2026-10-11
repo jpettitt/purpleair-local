@@ -206,8 +206,11 @@ def test_aqi_band_negative_clamped_to_lowest():
         (9.1, ("moderate", "#ffff00")),
         (35.4, ("moderate", "#ffff00")),
         (35.5, ("unhealthy_for_sensitive_groups", "#ff7e00")),
+        (55.4, ("unhealthy_for_sensitive_groups", "#ff7e00")),
         (55.5, ("unhealthy", "#ff0000")),
+        (125.4, ("unhealthy", "#ff0000")),
         (125.5, ("very_unhealthy", "#8f3f97")),
+        (225.4, ("very_unhealthy", "#8f3f97")),
         (225.5, ("hazardous", "#7e0023")),
         (1000.0, ("hazardous", "#7e0023")),  # extrapolate above top
     ],
@@ -216,48 +219,71 @@ def test_aqi_band_us_epa(pm, expected):
     assert aqi_band(pm, scheme=AQI_COLOR_SCHEME_US_EPA) == expected
 
 
-@pytest.mark.parametrize(
-    "pm,expected_category",
-    [
-        (0.0, "good"),
-        (10.0, "good"),
-        (10.1, "fair"),
-        (20.0, "fair"),
-        (20.1, "moderate"),
-        (25.0, "moderate"),
-        (25.1, "poor"),
-        (50.0, "poor"),
-        (50.1, "very_poor"),
-        (75.0, "very_poor"),
-        (75.1, "extremely_poor"),
-        (500.0, "extremely_poor"),
-    ],
-)
-def test_aqi_band_eu_eaqi(pm, expected_category):
-    category, color = aqi_band(pm, scheme=AQI_COLOR_SCHEME_EU_EAQI)
-    assert category == expected_category
-    assert color.startswith("#") and len(color) == 7
+def test_us_colour_bands_agree_with_the_aqi_breakpoints():
+    """The colour table repeats the breakpoint table's edges.
+
+    Every 0.1 µg/m³ step to 500 must land in the same category either
+    way, so an edge typo in one table can't make an entity show a
+    category that contradicts its own AQI state.
+    """
+    mismatches = [
+        pm
+        for pm in (i / 10 for i in range(5001))
+        if aqi_band(pm, scheme=AQI_COLOR_SCHEME_US_EPA)[0]
+        != aqi_category(pm25_to_aqi(pm)).value
+    ]
+    assert mismatches == []
 
 
 @pytest.mark.parametrize(
-    "pm,expected_category",
+    "pm,expected",
     [
-        (0.0, "low_1"),
-        (11.0, "low_1"),
-        (11.1, "low_2"),
-        (35.0, "low_3"),
-        (35.1, "moderate_4"),
-        (53.0, "moderate_6"),
-        (53.1, "high_7"),
-        (70.0, "high_9"),
-        (70.1, "very_high_10"),
-        (500.0, "very_high_10"),
+        # EEA's 2025 hourly bands: 0-5, 6-15, 16-50, 51-90, 91-140, >140.
+        (0.0, ("good", "#50f0e6")),
+        (5.0, ("good", "#50f0e6")),
+        (5.1, ("fair", "#50ccaa")),
+        (15.0, ("fair", "#50ccaa")),
+        (15.1, ("moderate", "#f0e641")),
+        (50.0, ("moderate", "#f0e641")),
+        (50.1, ("poor", "#ff5050")),
+        (90.0, ("poor", "#ff5050")),
+        (90.1, ("very_poor", "#960032")),
+        (140.0, ("very_poor", "#960032")),
+        (140.1, ("extremely_poor", "#7d2181")),
+        (800.0, ("extremely_poor", "#7d2181")),
     ],
 )
-def test_aqi_band_uk_daqi(pm, expected_category):
-    category, color = aqi_band(pm, scheme=AQI_COLOR_SCHEME_UK_DAQI)
-    assert category == expected_category
-    assert color.startswith("#") and len(color) == 7
+def test_aqi_band_eu_eaqi(pm, expected):
+    assert aqi_band(pm, scheme=AQI_COLOR_SCHEME_EU_EAQI) == expected
+
+
+@pytest.mark.parametrize(
+    "pm,expected",
+    [
+        (0.0, ("low_1", "#9cff9c")),
+        (11.0, ("low_1", "#9cff9c")),
+        (11.1, ("low_2", "#31ff00")),
+        (23.0, ("low_2", "#31ff00")),
+        (23.1, ("low_3", "#31cf00")),
+        (35.0, ("low_3", "#31cf00")),
+        (35.1, ("moderate_4", "#ffff00")),
+        (41.0, ("moderate_4", "#ffff00")),
+        (41.1, ("moderate_5", "#ffcf00")),
+        (47.0, ("moderate_5", "#ffcf00")),
+        (47.1, ("moderate_6", "#ff9a00")),
+        (53.0, ("moderate_6", "#ff9a00")),
+        (53.1, ("high_7", "#ff6464")),
+        (58.0, ("high_7", "#ff6464")),
+        (58.1, ("high_8", "#ff0000")),
+        (64.0, ("high_8", "#ff0000")),
+        (64.1, ("high_9", "#990000")),
+        (70.0, ("high_9", "#990000")),
+        (70.1, ("very_high_10", "#ce30ff")),
+        (500.0, ("very_high_10", "#ce30ff")),
+    ],
+)
+def test_aqi_band_uk_daqi(pm, expected):
+    assert aqi_band(pm, scheme=AQI_COLOR_SCHEME_UK_DAQI) == expected
 
 
 def test_aqi_band_unknown_scheme_falls_back_to_us_epa():
@@ -420,18 +446,19 @@ def test_extended_on_atm_matches_the_cf1_form_in_the_quadratic_region(cf1):
     )
 
 
-def test_extended_breakpoints_are_the_cf1_breakpoints_rescaled():
-    """Every boundary is a CF=1 boundary times 2/3.
+@pytest.mark.parametrize("atm", [210.0, 260.0])
+def test_extended_high_blend_meets_the_cf1_form_at_both_ends(
+    atm: float,
+) -> None:
+    """The CF=1 form switches to its quadratic at 343, i.e. ATM 228.7.
 
-    This is the tell that the piecewise structure exists only to undo
-    the Plantower's ATM scaling. 343 is where the published CF=1 form
-    switches to its quadratic; the deck's ATM form switches at 229.
+    The five-piece ATM form blends across 210-260 around that point
+    instead, and must meet the CF=1 form exactly where the blend starts
+    and ends. Between those ends the two only approximate each other.
     """
-    assert 343.0 * _ATM_OVER_CF1 == pytest.approx(228.7, abs=0.1)
-    # The 30 -> 50 blend roughly covers the Plantower's transition: the 2024
-    # corrigendum puts it at cf_1 30 (ratio 1.0) through cf_1 80 (0.66).
-    assert 30.0 * 1.0 == pytest.approx(30.0)
-    assert 80.0 * 0.66 == pytest.approx(52.8, abs=0.1)
+    assert correct_epa_extended(atm, 50.0) == pytest.approx(
+        _published_epa_extended_cf1(atm / _ATM_OVER_CF1, 50.0), rel=1e-3
+    )
 
 
 def test_feeding_cf1_to_the_extended_form_is_badly_wrong_in_smoke():
@@ -561,3 +588,29 @@ def test_aqi_epa_extended_returns_an_index():
     assert aqi_epa_extended(10.0, 50.0) == pm25_to_aqi(
         correct_epa_extended(10.0, 50.0)
     )
+
+
+# --- truncation must survive float error ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "corrected,exact",
+    [
+        (correct_epa(67.6, 2.0), 41.0),  # 40.99999999999999
+        (correct_lrapa(2.32), 0.5),  # 0.4999999999999999
+    ],
+)
+def test_truncation_is_not_fooled_by_float_error(
+    corrected: float, exact: float
+) -> None:
+    """An exact tenth that float arithmetic lands just below must not
+    truncate one step low (AQI 114 instead of 115 for the EPA case)."""
+    assert corrected != exact  # the float error is real
+    assert pm25_to_aqi(corrected) == pm25_to_aqi(exact)
+    assert aqi_band(corrected) == aqi_band(exact)
+
+
+def test_truncation_still_truncates() -> None:
+    """9.09 is 9.0 for the EPA table, not 9.1."""
+    assert pm25_to_aqi(9.09) == pm25_to_aqi(9.0)
+    assert pm25_to_aqi(9.09) != pm25_to_aqi(9.1)
